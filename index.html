@@ -34,8 +34,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .badge-live svg{color:var(--text3);}
 .btn-refresh{display:flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);padding:5px 12px;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;transition:background .15s,border-color .15s;}
 .btn-refresh:hover{background:var(--bg4);border-color:rgba(108,99,255,.4);color:var(--accent);}
-.btn-refresh svg{transition:transform .5s;}
-.btn-refresh.spinning svg{transform:rotate(360deg);}
+.btn-refresh svg{transition:transform .3s;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.btn-refresh.spinning svg{animation:spin .8s linear infinite;}
+.btn-refresh.spinning{opacity:.7;pointer-events:none;}
 .content{padding:28px 32px;}
 .tabs{display:flex;gap:4px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:4px;margin-bottom:28px;width:fit-content;}
 .tab-btn{padding:7px 16px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text2);background:none;border:none;transition:all .15s;display:flex;align-items:center;gap:7px;font-family:'DM Sans',sans-serif;}
@@ -106,11 +108,6 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
 .cust-table td{padding:10px 12px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle;}
 .cust-table tr:last-child td{border-bottom:none;}
 .cust-table tr:hover td{background:var(--bg3);}
-.hist-filters{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
-.hist-filters label{font-size:12px;color:var(--text3);}
-.hist-filters select{height:32px;font-size:12px;padding:4px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;color:var(--text);cursor:pointer;}
-.hist-filters .btn-reset-hist{height:32px;padding:0 12px;font-size:12px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;color:var(--text3);cursor:pointer;}
-.hist-filters .btn-reset-hist:hover{color:var(--accent);border-color:rgba(108,99,255,.4);}
 .cust-id{font-family:'DM Mono',monospace;font-size:11px;color:var(--text3);}
 .tag{font-size:11px;padding:3px 8px;border-radius:4px;font-weight:500;}
 .tag-active{background:var(--green-bg);color:var(--green);}
@@ -323,13 +320,16 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
 
     <!-- HISTORIAL -->
     <div id="pane-historial" class="pane">
-      <!-- Filtro de período -->
-      <div class="hist-filters">
-        <label>Desde</label>
-        <select id="hist-from" onchange="renderHistorial()"><option value="">Inicio</option></select>
-        <label>Hasta</label>
-        <select id="hist-to" onchange="renderHistorial()"><option value="">Hoy</option></select>
-        <button class="btn-reset-hist" onclick="resetHistFilters()">✕ Limpiar</button>
+      <div class="filters-bar">
+        <div class="fg"><label class="fl">Período</label>
+          <select id="hist-period" onchange="renderHistorial()">
+            <option value="all" selected>Todo el tiempo</option>
+            <option value="ytd">Acumulado del año</option>
+            <option value="12">Últimos 12 meses</option>
+            <option value="6">Últimos 6 meses</option>
+            <option value="3">Últimos 3 meses</option>
+          </select>
+        </div>
       </div>
       <div class="card" style="margin-bottom:14px">
         <div class="card-title">Evolución mensual de suscripciones</div>
@@ -814,67 +814,70 @@ function renderComp(){
 }
 
 // HISTORIAL
-function getMonthlyStats(){
-  const months={};
-  SUBS.forEach(s=>{
-    const m=new Date(s.created*1000).toISOString().slice(0,7);
-    if(!months[m])months[m]={month:m,new:0,canceled:0,active:0,trialing:0,past_due:0,mrr:0};
-    months[m].new++;
-    months[m][s.status]=(months[m][s.status]||0)+1;
-    if(s.status==='active'){
-      const mr=s.interval==='month'?s.amount/s.interval_count:s.interval==='year'?s.amount/12:s.amount;
-      months[m].mrr+=mr;
-    }
-  });
-  return Object.values(months).sort((a,b)=>a.month.localeCompare(b.month));
-}
-
-// ── Historial state ──────────────────────────────────────────────────────────
+// ── Historial ─────────────────────────────────────────────────────────────────
 let histSortCol='month', histSortDir='asc';
 
-function resetHistFilters(){
-  document.getElementById('hist-from').value='';
-  document.getElementById('hist-to').value='';
-  renderHistorial();
-}
-
 function sortHist(col){
-  if(histSortCol===col){
-    histSortDir=histSortDir==='asc'?'desc':'asc';
-  } else {
-    histSortCol=col;
-    histSortDir=col==='month'?'asc':'desc';
-  }
+  histSortDir = (histSortCol===col && histSortDir==='asc') ? 'desc' : (col==='month' ? 'asc' : 'desc');
+  histSortCol = col;
   renderHistorial();
 }
 
-function populateHistFilters(allMonths){
-  const from=document.getElementById('hist-from');
-  const to=document.getElementById('hist-to');
-  const curFrom=from.value, curTo=to.value;
-  from.innerHTML='<option value="">Inicio</option>';
-  to.innerHTML='<option value="">Hoy</option>';
-  allMonths.forEach(m=>{
-    from.innerHTML+=`<option value="${m}"${m===curFrom?'selected':''}>${m}</option>`;
-    to.innerHTML+=`<option value="${m}"${m===curTo?'selected':''}>${m}</option>`;
+function getMonthlyStats(){
+  const months={};
+  function ensure(m){if(!months[m])months[m]={month:m,new:0,canceled:0,active:0,trialing:0,past_due:0,mrr:0};}
+
+  SUBS.forEach(s=>{
+    // Nuevas → mes de creación
+    const mc=new Date(s.created*1000).toISOString().slice(0,7);
+    ensure(mc);
+    months[mc].new++;
+    if(s.status==='active'){
+      const mr=s.interval==='month'?s.amount/s.interval_count:s.interval==='year'?s.amount/12:s.amount;
+      months[mc].mrr+=mr;
+    } else if(s.status!=='canceled'){
+      months[mc][s.status]=(months[mc][s.status]||0)+1;
+    }
+    // Canceladas → usar canceled_at (campo ca) si existe, sino created
+    if(s.status==='canceled'){
+      const cancelTs=s.canceled_at||s.ca||s.created;
+      const mk=new Date(cancelTs*1000).toISOString().slice(0,7);
+      ensure(mk);
+      months[mk].canceled++;
+    }
   });
+
+  // Rellenar gaps hasta el mes actual
+  const keys=Object.keys(months).sort();
+  if(keys.length){
+    const cur=new Date().toISOString().slice(0,7);
+    let d=new Date(keys[0]+'-01');
+    const end=new Date(cur+'-01');
+    while(d<=end){ensure(d.toISOString().slice(0,7));d.setMonth(d.getMonth()+1);}
+  }
+  return Object.values(months).sort((a,b)=>a.month.localeCompare(b.month));
 }
 
 function renderHistorial(){
   ['hm','hn','hc'].forEach(k=>{if(CHARTS[k]){try{CHARTS[k].destroy();}catch(e){}delete CHARTS[k];}});
+
   const allMs=getMonthlyStats();
 
-  // Populate filter dropdowns with all available months
-  populateHistFilters(allMs.map(m=>m.month));
-
   // Apply period filter
-  const fromVal=document.getElementById('hist-from')?.value||'';
-  const toVal=document.getElementById('hist-to')?.value||'';
-  const ms=allMs.filter(m=>{
-    if(fromVal && m.month<fromVal) return false;
-    if(toVal && m.month>toVal) return false;
-    return true;
-  });
+  const pv=document.getElementById('hist-period')?.value||'all';
+  let ms=allMs;
+  if(pv!=='all'){
+    const now=new Date();
+    let cutoff;
+    if(pv==='ytd'){
+      cutoff=new Date(now.getFullYear(),0,1).toISOString().slice(0,7);
+    } else {
+      const n=parseInt(pv);
+      const d=new Date(now.getFullYear(),now.getMonth()-n+1,1);
+      cutoff=d.toISOString().slice(0,7);
+    }
+    ms=allMs.filter(m=>m.month>=cutoff);
+  }
 
   const labels=ms.map(m=>{const[y,mo]=m.month.split('-');return new Date(parseInt(y),parseInt(mo)-1).toLocaleDateString('es-AR',{month:'short',year:'2-digit'});});
 
@@ -888,7 +891,7 @@ function renderHistorial(){
     const c3=document.getElementById('chart-hist-cancel');
     if(c3)CHARTS.hc=new Chart(c3,{type:'line',data:{labels,datasets:[{label:'Canceladas',data:ms.map(m=>m.canceled||0),borderColor:'#ef4444',backgroundColor:'rgba(239,68,68,.1)',borderWidth:2,fill:true,tension:.4,pointRadius:2,pointHoverRadius:5}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:lineXOpts,y:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}}}});
 
-    // Build table rows with running total (always chronological for accumulator)
+    // Compute running total always in chronological order first
     let running=0;
     const rows=ms.map(m=>{
       const net=(m.new||0)-(m.canceled||0);
@@ -898,22 +901,16 @@ function renderHistorial(){
 
     // Sort table
     const dir=histSortDir==='asc'?1:-1;
-    rows.sort((a,b)=>{
-      const av=a[histSortCol], bv=b[histSortCol];
-      if(typeof av==='string') return dir*av.localeCompare(bv);
-      return dir*(av-bv);
-    });
+    rows.sort((a,b)=>typeof a[histSortCol]==='string'?dir*a[histSortCol].localeCompare(b[histSortCol]):dir*(a[histSortCol]-b[histSortCol]));
 
-    // Update header classes
+    // Update header sort indicators
     document.querySelectorAll('#hist-table th.sortable').forEach(th=>{
       th.classList.remove('sort-asc','sort-desc');
-      const icon=th.querySelector('.sort-icon');
+      const ic=th.querySelector('.sort-icon');
       if(th.dataset.col===histSortCol){
         th.classList.add(histSortDir==='asc'?'sort-asc':'sort-desc');
-        if(icon) icon.textContent=histSortDir==='asc'?'↑':'↓';
-      } else {
-        if(icon) icon.textContent='↕';
-      }
+        if(ic)ic.textContent=histSortDir==='asc'?'↑':'↓';
+      } else {if(ic)ic.textContent='↕';}
     });
 
     document.getElementById('hist-tbody').innerHTML=rows.map(r=>`<tr>
@@ -1142,56 +1139,73 @@ function renderCupones(){
 // set window.GAMMALITO_API to the full URL, e.g.
 // https://tu-proyecto.vercel.app/api/refresh
 const REFRESH_ENDPOINT = (window.GAMMALITO_API || '/api/refresh');
+const STORAGE_KEY = 'gammalito_cache_v1';
+
+function freshCanvas(id){
+  const old=document.getElementById(id);if(!old)return;
+  const nw=document.createElement('canvas');nw.id=id;nw.setAttribute('role','img');
+  old.parentNode.replaceChild(nw,old);
+}
+
+function applyData(data){
+  RAW=data.RAW;
+  SUBS=RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null}));
+  INV_DATA=data.INV_DATA||INV_DATA;
+  CUS_MRR=data.CUS_MRR||CUS_MRR;
+  CMAP=data.CMAP||CMAP;
+}
 
 function rerenderAll(){
-  // reset memoized state so it's rebuilt from the new data
-  ALL_CUSTS = null;
   Object.keys(CHARTS).forEach(k=>{try{CHARTS[k].destroy();}catch(e){}delete CHARTS[k];});
+  ['chart-timeline','chart-revenue','chart-donut',
+   'chart-comp-main','chart-comp-metric','chart-comp-donut','chart-comp-rate',
+   'chart-hist-monthly','chart-hist-new','chart-hist-cancel',
+   'chart-cup-bar'].forEach(freshCanvas);
+  ALL_CUSTS=null;
   renderOverview();
   renderComp();
-  renderHistorial();
+  requestAnimationFrame(()=>renderHistorial());
   initClientes();
   initCupones();
 }
 
+function setTimestamp(isoStr){
+  const lu=document.getElementById('last-updated');if(!lu)return;
+  const ts=isoStr?new Date(isoStr):new Date();
+  lu.textContent=ts.toLocaleString('es-AR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+
+function saveToCache(data){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(data));}catch(e){}}
+function loadFromCache(){try{const r=localStorage.getItem(STORAGE_KEY);return r?JSON.parse(r):null;}catch(e){return null;}}
+
 async function fetchAndRefresh(){
   const btn=document.getElementById('btn-refresh');
-  if(btn) btn.classList.add('spinning');
+  if(btn)btn.classList.add('spinning');
   try{
-    const resp = await fetch(REFRESH_ENDPOINT, {cache:'no-store'});
-    if(!resp.ok) throw new Error('HTTP '+resp.status);
-    const data = await resp.json();
-    if(!data || !Array.isArray(data.RAW)) throw new Error('Respuesta inválida');
-
-    RAW = data.RAW;
-    SUBS = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus}));
-    INV_DATA = data.INV_DATA || INV_DATA;
-    CUS_MRR = data.CUS_MRR || CUS_MRR;
-    CMAP = data.CMAP || CMAP;
-
+    const resp=await fetch(REFRESH_ENDPOINT,{cache:'no-store'});
+    if(!resp.ok)throw new Error('HTTP '+resp.status);
+    const data=await resp.json();
+    if(!data||!Array.isArray(data.RAW))throw new Error('Respuesta inválida');
+    applyData(data);
+    saveToCache(data);
     rerenderAll();
-
-    const ts = data.generatedAt ? new Date(data.generatedAt) : new Date();
-    const fmtTs = ts.toLocaleString('es-AR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-    const lu = document.getElementById('last-updated');
-    if(lu) lu.textContent = fmtTs;
+    setTimestamp(data.generatedAt);
   }catch(err){
-    console.error('Refresh failed', err);
-    const lu = document.getElementById('last-updated');
-    if(lu) lu.textContent = 'Error al actualizar';
+    console.error('Refresh failed',err);
+    const lu=document.getElementById('last-updated');
+    if(lu)lu.textContent='Error al actualizar';
   }finally{
-    if(btn) btn.classList.remove('spinning');
+    if(btn)btn.classList.remove('spinning');
   }
 }
-function closeOverlay(){
-  const o=document.getElementById('refresh-overlay');
-  if(o) o.style.display='none';
-}
-function requestRefresh(){
-  closeOverlay();
-  fetchAndRefresh();
-}
-document.addEventListener('DOMContentLoaded',()=>renderOverview());
+function closeOverlay(){const o=document.getElementById('refresh-overlay');if(o)o.style.display='none';}
+function requestRefresh(){closeOverlay();fetchAndRefresh();}
+
+document.addEventListener('DOMContentLoaded',()=>{
+  const cached=loadFromCache();
+  if(cached&&Array.isArray(cached.RAW)){applyData(cached);setTimestamp(cached.generatedAt);}
+  renderOverview();
+});
 </script>
 </body>
 </html>
