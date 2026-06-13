@@ -34,8 +34,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .badge-live svg{color:var(--text3);}
 .btn-refresh{display:flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);padding:5px 12px;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;transition:background .15s,border-color .15s;}
 .btn-refresh:hover{background:var(--bg4);border-color:rgba(108,99,255,.4);color:var(--accent);}
-.btn-refresh svg{transition:transform .5s;}
-.btn-refresh.spinning svg{transform:rotate(360deg);}
+.btn-refresh svg{transition:transform .3s;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.btn-refresh.spinning svg{animation:spin .8s linear infinite;}
+.btn-refresh.spinning{opacity:.7;pointer-events:none;}
 .content{padding:28px 32px;}
 .tabs{display:flex;gap:4px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:4px;margin-bottom:28px;width:fit-content;}
 .tab-btn{padding:7px 16px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text2);background:none;border:none;transition:all .15s;display:flex;align-items:center;gap:7px;font-family:'DM Sans',sans-serif;}
@@ -1056,10 +1058,10 @@ function renderCupones(){
 // set window.GAMMALITO_API to the full URL, e.g.
 // https://tu-proyecto.vercel.app/api/refresh
 const REFRESH_ENDPOINT = (window.GAMMALITO_API || '/api/refresh');
+const STORAGE_KEY = 'gammalito_cache_v1';
 
+// ── canvas helpers ───────────────────────────────────────────────────────────
 function freshCanvas(id){
-  // Chart.js reutiliza el canvas interno aunque se llame destroy().
-  // La única forma segura es reemplazar el nodo DOM por uno nuevo.
   const old = document.getElementById(id);
   if(!old) return;
   const nw = document.createElement('canvas');
@@ -1067,26 +1069,58 @@ function freshCanvas(id){
   nw.setAttribute('role','img');
   old.parentNode.replaceChild(nw, old);
 }
+
+// ── apply data from a payload object ────────────────────────────────────────
+function applyData(data){
+  RAW      = data.RAW;
+  SUBS     = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus}));
+  INV_DATA = data.INV_DATA || INV_DATA;
+  CUS_MRR  = data.CUS_MRR  || CUS_MRR;
+  CMAP     = data.CMAP     || CMAP;
+}
+
+// ── full re-render ───────────────────────────────────────────────────────────
 function rerenderAll(){
-  // 1. Destruir instancias de Chart.js
+  // 1. Destruir instancias Chart.js
   Object.keys(CHARTS).forEach(k=>{try{CHARTS[k].destroy();}catch(e){}delete CHARTS[k];});
-  // 2. Reemplazar todos los canvas para evitar "Canvas is already in use"
+  // 2. Reemplazar canvas DOM (evita "Canvas is already in use")
   ['chart-timeline','chart-revenue','chart-donut',
    'chart-comp-main','chart-comp-metric','chart-comp-donut','chart-comp-rate',
    'chart-hist-monthly','chart-hist-new','chart-hist-cancel',
    'chart-cup-bar'].forEach(freshCanvas);
   // 3. Reset estado memoizado
   ALL_CUSTS = null;
-  // 4. Re-render todas las pestañas
+  // 4. Re-render pestañas — historial necesita requestAnimationFrame propio
+  //    para que el canvas nuevo ya esté en el DOM cuando Chart.js lo busca
   renderOverview();
   renderComp();
-  renderHistorial();
+  requestAnimationFrame(()=>renderHistorial());
   initClientes();
   initCupones();
 }
 
+// ── update timestamp label ───────────────────────────────────────────────────
+function setTimestamp(isoStr){
+  const lu = document.getElementById('last-updated');
+  if(!lu) return;
+  const ts = isoStr ? new Date(isoStr) : new Date();
+  lu.textContent = ts.toLocaleString('es-AR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+
+// ── persistencia localStorage ────────────────────────────────────────────────
+function saveToCache(data){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }catch(e){}
+}
+function loadFromCache(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){ return null; }
+}
+
+// ── fetch & refresh ──────────────────────────────────────────────────────────
 async function fetchAndRefresh(){
-  const btn=document.getElementById('btn-refresh');
+  const btn = document.getElementById('btn-refresh');
   if(btn) btn.classList.add('spinning');
   try{
     const resp = await fetch(REFRESH_ENDPOINT, {cache:'no-store'});
@@ -1094,18 +1128,10 @@ async function fetchAndRefresh(){
     const data = await resp.json();
     if(!data || !Array.isArray(data.RAW)) throw new Error('Respuesta inválida');
 
-    RAW = data.RAW;
-    SUBS = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus}));
-    INV_DATA = data.INV_DATA || INV_DATA;
-    CUS_MRR = data.CUS_MRR || CUS_MRR;
-    CMAP = data.CMAP || CMAP;
-
+    applyData(data);
+    saveToCache(data);
     rerenderAll();
-
-    const ts = data.generatedAt ? new Date(data.generatedAt) : new Date();
-    const fmtTs = ts.toLocaleString('es-AR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-    const lu = document.getElementById('last-updated');
-    if(lu) lu.textContent = fmtTs;
+    setTimestamp(data.generatedAt);
   }catch(err){
     console.error('Refresh failed', err);
     const lu = document.getElementById('last-updated');
@@ -1114,6 +1140,7 @@ async function fetchAndRefresh(){
     if(btn) btn.classList.remove('spinning');
   }
 }
+
 function closeOverlay(){
   const o=document.getElementById('refresh-overlay');
   if(o) o.style.display='none';
@@ -1122,7 +1149,16 @@ function requestRefresh(){
   closeOverlay();
   fetchAndRefresh();
 }
-document.addEventListener('DOMContentLoaded',()=>renderOverview());
+
+// ── init: carga caché si existe, si no usa datos embebidos ──────────────────
+document.addEventListener('DOMContentLoaded',()=>{
+  const cached = loadFromCache();
+  if(cached && Array.isArray(cached.RAW)){
+    applyData(cached);
+    setTimestamp(cached.generatedAt);
+  }
+  renderOverview();
+});
 </script>
 </body>
 </html>
