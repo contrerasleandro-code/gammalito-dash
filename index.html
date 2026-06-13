@@ -801,16 +801,45 @@ function renderComp(){
 // HISTORIAL
 function getMonthlyStats(){
   const months={};
-  SUBS.forEach(s=>{
-    const m=new Date(s.created*1000).toISOString().slice(0,7);
+
+  function ensureMonth(m){
     if(!months[m])months[m]={month:m,new:0,canceled:0,active:0,trialing:0,past_due:0,mrr:0};
-    months[m].new++;
-    months[m][s.status]=(months[m][s.status]||0)+1;
+  }
+
+  SUBS.forEach(s=>{
+    // "Nuevas" y estados activos → mes de creación
+    const mCreated=new Date(s.created*1000).toISOString().slice(0,7);
+    ensureMonth(mCreated);
+    months[mCreated].new++;
     if(s.status==='active'){
       const mr=s.interval==='month'?s.amount/s.interval_count:s.interval==='year'?s.amount/12:s.amount;
-      months[m].mrr+=mr;
+      months[mCreated].mrr+=mr;
+    } else if(s.status!=='canceled'){
+      months[mCreated][s.status]=(months[mCreated][s.status]||0)+1;
+    }
+
+    // "Canceladas" → usar canceled_at si existe, sino fallback a created
+    if(s.status==='canceled'){
+      const cancelTs=s.canceled_at||s.created;
+      const mCanceled=new Date(cancelTs*1000).toISOString().slice(0,7);
+      ensureMonth(mCanceled);
+      months[mCanceled].canceled++;
     }
   });
+
+  // Rellenar meses sin gaps desde el primero hasta el mes actual
+  const allMonths=Object.keys(months).sort();
+  if(allMonths.length>0){
+    const currentMonth=new Date().toISOString().slice(0,7);
+    let cursor=new Date(allMonths[0]+'-01');
+    const end=new Date(currentMonth+'-01');
+    while(cursor<=end){
+      const m=cursor.toISOString().slice(0,7);
+      ensureMonth(m);
+      cursor.setMonth(cursor.getMonth()+1);
+    }
+  }
+
   return Object.values(months).sort((a,b)=>a.month.localeCompare(b.month));
 }
 
@@ -818,15 +847,18 @@ function renderHistorial(){
   // Destroy existing charts before re-rendering
   ['hm','hn','hc'].forEach(k=>{if(CHARTS[k]){try{CHARTS[k].destroy();}catch(e){}delete CHARTS[k];}});
   const ms=getMonthlyStats();
+  // Labels: "abr 25" format for every month
   const labels=ms.map(m=>{const[y,mo]=m.month.split('-');return new Date(parseInt(y),parseInt(mo)-1).toLocaleDateString('es-AR',{month:'short',year:'2-digit'});});
   requestAnimationFrame(()=>{
-    // Main chart - stacked new vs canceled
+    // Main chart - stacked new vs canceled (bar, autoSkip ok here)
     const c1=document.getElementById('chart-hist-monthly');
-    if(c1)CHARTS.hm=new Chart(c1,{type:'bar',data:{labels,datasets:[{label:'Nuevas',data:ms.map(m=>m.new),backgroundColor:'rgba(108,99,255,.5)',borderColor:'#6c63ff',borderWidth:1,borderRadius:3,stack:'s'},{label:'Canceladas',data:ms.map(m=>-(m.canceled||0)),backgroundColor:'rgba(239,68,68,.4)',borderColor:'#ef4444',borderWidth:1,borderRadius:3,stack:'s'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,position:'top',labels:{boxWidth:10,padding:16,color:'#8b8a94'}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${Math.abs(ctx.raw)}`}}},scales:{x:{grid:{display:false},ticks:{autoSkip:false,maxRotation:45,font:{size:10}}},y:{grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}}}});
+    if(c1)CHARTS.hm=new Chart(c1,{type:'bar',data:{labels,datasets:[{label:'Nuevas',data:ms.map(m=>m.new),backgroundColor:'rgba(108,99,255,.5)',borderColor:'#6c63ff',borderWidth:1,borderRadius:3,stack:'s'},{label:'Canceladas',data:ms.map(m=>-(m.canceled||0)),backgroundColor:'rgba(239,68,68,.4)',borderColor:'#ef4444',borderWidth:1,borderRadius:3,stack:'s'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,position:'top',labels:{boxWidth:10,padding:16,color:'#8b8a94'}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${Math.abs(ctx.raw)}`}}},scales:{x:{grid:{display:false},ticks:{autoSkip:true,maxTicksLimit:14,maxRotation:45,font:{size:10}}},y:{grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}}}});
+    // Line charts: show every month label (no autoSkip)
+    const lineXOpts={grid:{display:false},ticks:{autoSkip:false,maxRotation:45,font:{size:9}}};
     const c2=document.getElementById('chart-hist-new');
-    if(c2)CHARTS.hn=new Chart(c2,{type:'line',data:{labels,datasets:[{label:'Nuevas',data:ms.map(m=>m.new),borderColor:'#6c63ff',backgroundColor:'rgba(108,99,255,.1)',borderWidth:2,fill:true,tension:.4,pointRadius:3,pointHoverRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{autoSkip:true,maxTicksLimit:6,font:{size:10}}},y:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}}}});
+    if(c2)CHARTS.hn=new Chart(c2,{type:'line',data:{labels,datasets:[{label:'Nuevas',data:ms.map(m=>m.new),borderColor:'#6c63ff',backgroundColor:'rgba(108,99,255,.1)',borderWidth:2,fill:true,tension:.4,pointRadius:2,pointHoverRadius:5}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:lineXOpts,y:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}}}});
     const c3=document.getElementById('chart-hist-cancel');
-    if(c3)CHARTS.hc=new Chart(c3,{type:'line',data:{labels,datasets:[{label:'Canceladas',data:ms.map(m=>m.canceled||0),borderColor:'#ef4444',backgroundColor:'rgba(239,68,68,.1)',borderWidth:2,fill:true,tension:.4,pointRadius:3,pointHoverRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{autoSkip:true,maxTicksLimit:6,font:{size:10}}},y:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}}}});
+    if(c3)CHARTS.hc=new Chart(c3,{type:'line',data:{labels,datasets:[{label:'Canceladas',data:ms.map(m=>m.canceled||0),borderColor:'#ef4444',backgroundColor:'rgba(239,68,68,.1)',borderWidth:2,fill:true,tension:.4,pointRadius:2,pointHoverRadius:5}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:lineXOpts,y:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}}}});
     let running=0;
     document.getElementById('hist-tbody').innerHTML=ms.map(m=>{
       const net=(m.new||0)-(m.canceled||0);
@@ -1060,38 +1092,29 @@ function renderCupones(){
 const REFRESH_ENDPOINT = (window.GAMMALITO_API || '/api/refresh');
 const STORAGE_KEY = 'gammalito_cache_v1';
 
-// ── canvas helpers ───────────────────────────────────────────────────────────
 function freshCanvas(id){
-  const old = document.getElementById(id);
-  if(!old) return;
-  const nw = document.createElement('canvas');
-  nw.id = id;
-  nw.setAttribute('role','img');
-  old.parentNode.replaceChild(nw, old);
+  const old=document.getElementById(id);
+  if(!old)return;
+  const nw=document.createElement('canvas');
+  nw.id=id;nw.setAttribute('role','img');
+  old.parentNode.replaceChild(nw,old);
 }
 
-// ── apply data from a payload object ────────────────────────────────────────
 function applyData(data){
-  RAW      = data.RAW;
-  SUBS     = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus}));
-  INV_DATA = data.INV_DATA || INV_DATA;
-  CUS_MRR  = data.CUS_MRR  || CUS_MRR;
-  CMAP     = data.CMAP     || CMAP;
+  RAW=data.RAW;
+  SUBS=RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null}));
+  INV_DATA=data.INV_DATA||INV_DATA;
+  CUS_MRR=data.CUS_MRR||CUS_MRR;
+  CMAP=data.CMAP||CMAP;
 }
 
-// ── full re-render ───────────────────────────────────────────────────────────
 function rerenderAll(){
-  // 1. Destruir instancias Chart.js
   Object.keys(CHARTS).forEach(k=>{try{CHARTS[k].destroy();}catch(e){}delete CHARTS[k];});
-  // 2. Reemplazar canvas DOM (evita "Canvas is already in use")
   ['chart-timeline','chart-revenue','chart-donut',
    'chart-comp-main','chart-comp-metric','chart-comp-donut','chart-comp-rate',
    'chart-hist-monthly','chart-hist-new','chart-hist-cancel',
    'chart-cup-bar'].forEach(freshCanvas);
-  // 3. Reset estado memoizado
-  ALL_CUSTS = null;
-  // 4. Re-render pestañas — historial necesita requestAnimationFrame propio
-  //    para que el canvas nuevo ya esté en el DOM cuando Chart.js lo busca
+  ALL_CUSTS=null;
   renderOverview();
   renderComp();
   requestAnimationFrame(()=>renderHistorial());
@@ -1099,61 +1122,42 @@ function rerenderAll(){
   initCupones();
 }
 
-// ── update timestamp label ───────────────────────────────────────────────────
 function setTimestamp(isoStr){
-  const lu = document.getElementById('last-updated');
-  if(!lu) return;
-  const ts = isoStr ? new Date(isoStr) : new Date();
-  lu.textContent = ts.toLocaleString('es-AR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const lu=document.getElementById('last-updated');
+  if(!lu)return;
+  const ts=isoStr?new Date(isoStr):new Date();
+  lu.textContent=ts.toLocaleString('es-AR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
 }
 
-// ── persistencia localStorage ────────────────────────────────────────────────
-function saveToCache(data){
-  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }catch(e){}
-}
-function loadFromCache(){
-  try{
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  }catch(e){ return null; }
-}
+function saveToCache(data){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(data));}catch(e){}}
+function loadFromCache(){try{const r=localStorage.getItem(STORAGE_KEY);return r?JSON.parse(r):null;}catch(e){return null;}}
 
-// ── fetch & refresh ──────────────────────────────────────────────────────────
 async function fetchAndRefresh(){
-  const btn = document.getElementById('btn-refresh');
-  if(btn) btn.classList.add('spinning');
+  const btn=document.getElementById('btn-refresh');
+  if(btn)btn.classList.add('spinning');
   try{
-    const resp = await fetch(REFRESH_ENDPOINT, {cache:'no-store'});
-    if(!resp.ok) throw new Error('HTTP '+resp.status);
-    const data = await resp.json();
-    if(!data || !Array.isArray(data.RAW)) throw new Error('Respuesta inválida');
-
+    const resp=await fetch(REFRESH_ENDPOINT,{cache:'no-store'});
+    if(!resp.ok)throw new Error('HTTP '+resp.status);
+    const data=await resp.json();
+    if(!data||!Array.isArray(data.RAW))throw new Error('Respuesta inválida');
     applyData(data);
     saveToCache(data);
     rerenderAll();
     setTimestamp(data.generatedAt);
   }catch(err){
-    console.error('Refresh failed', err);
-    const lu = document.getElementById('last-updated');
-    if(lu) lu.textContent = 'Error al actualizar';
+    console.error('Refresh failed',err);
+    const lu=document.getElementById('last-updated');
+    if(lu)lu.textContent='Error al actualizar';
   }finally{
-    if(btn) btn.classList.remove('spinning');
+    if(btn)btn.classList.remove('spinning');
   }
 }
+function closeOverlay(){const o=document.getElementById('refresh-overlay');if(o)o.style.display='none';}
+function requestRefresh(){closeOverlay();fetchAndRefresh();}
 
-function closeOverlay(){
-  const o=document.getElementById('refresh-overlay');
-  if(o) o.style.display='none';
-}
-function requestRefresh(){
-  closeOverlay();
-  fetchAndRefresh();
-}
-
-// ── init: carga caché si existe, si no usa datos embebidos ──────────────────
 document.addEventListener('DOMContentLoaded',()=>{
-  const cached = loadFromCache();
-  if(cached && Array.isArray(cached.RAW)){
+  const cached=loadFromCache();
+  if(cached&&Array.isArray(cached.RAW)){
     applyData(cached);
     setTimestamp(cached.generatedAt);
   }
