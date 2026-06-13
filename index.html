@@ -1057,10 +1057,27 @@ function renderCupones(){
 // https://tu-proyecto.vercel.app/api/refresh
 const REFRESH_ENDPOINT = (window.GAMMALITO_API || '/api/refresh');
 
+function freshCanvas(id){
+  // Chart.js reutiliza el canvas interno aunque se llame destroy().
+  // La única forma segura es reemplazar el nodo DOM por uno nuevo.
+  const old = document.getElementById(id);
+  if(!old) return;
+  const nw = document.createElement('canvas');
+  nw.id = id;
+  nw.setAttribute('role','img');
+  old.parentNode.replaceChild(nw, old);
+}
 function rerenderAll(){
-  // reset memoized state so it's rebuilt from the new data
-  ALL_CUSTS = null;
+  // 1. Destruir instancias de Chart.js
   Object.keys(CHARTS).forEach(k=>{try{CHARTS[k].destroy();}catch(e){}delete CHARTS[k];});
+  // 2. Reemplazar todos los canvas para evitar "Canvas is already in use"
+  ['chart-timeline','chart-revenue','chart-donut',
+   'chart-comp-main','chart-comp-metric','chart-comp-donut','chart-comp-rate',
+   'chart-hist-monthly','chart-hist-new','chart-hist-cancel',
+   'chart-cup-bar'].forEach(freshCanvas);
+  // 3. Reset estado memoizado
+  ALL_CUSTS = null;
+  // 4. Re-render todas las pestañas
   renderOverview();
   renderComp();
   renderHistorial();
