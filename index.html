@@ -34,8 +34,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .badge-live svg{color:var(--text3);}
 .btn-refresh{display:flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);padding:5px 12px;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;transition:background .15s,border-color .15s;}
 .btn-refresh:hover{background:var(--bg4);border-color:rgba(108,99,255,.4);color:var(--accent);}
-.btn-refresh svg{transition:transform .5s;}
-.btn-refresh.spinning svg{transform:rotate(360deg);}
+.btn-refresh svg{transition:color .15s;}
+@keyframes spin-icon{to{transform:rotate(360deg)}}
+.btn-refresh.spinning svg{animation:spin-icon .7s linear infinite;}
 .content{padding:28px 32px;}
 .tabs{display:flex;gap:4px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:4px;margin-bottom:28px;width:fit-content;}
 .tab-btn{padding:7px 16px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text2);background:none;border:none;transition:all .15s;display:flex;align-items:center;gap:7px;font-family:'DM Sans',sans-serif;}
@@ -1147,10 +1148,16 @@ async function fetchAndRefresh(){
     if(!data || !Array.isArray(data.RAW)) throw new Error('Respuesta inválida');
 
     RAW = data.RAW;
-    SUBS = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus}));
+    SUBS = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null}));
     INV_DATA = data.INV_DATA || INV_DATA;
     CUS_MRR = data.CUS_MRR || CUS_MRR;
     CMAP = data.CMAP || CMAP;
+
+    // Persist fetched data so page reloads keep the latest snapshot
+    try{
+      const ts2=data.generatedAt||Math.floor(Date.now()/1000);
+      localStorage.setItem('gl_data',JSON.stringify({RAW:data.RAW,INV_DATA:data.INV_DATA||null,CUS_MRR:data.CUS_MRR||null,CMAP:data.CMAP||null,generatedAt:ts2}));
+    }catch(e){}
 
     rerenderAll();
 
@@ -1175,6 +1182,21 @@ function requestRefresh(){
   fetchAndRefresh();
 }
 document.addEventListener('DOMContentLoaded',()=>{
+  // Restore persisted Stripe data snapshot (overrides the baked-in RAW if newer)
+  try{
+    const cached=JSON.parse(localStorage.getItem('gl_data')||'null');
+    if(cached && Array.isArray(cached.RAW) && cached.RAW.length){
+      RAW = cached.RAW;
+      SUBS = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null}));
+      if(cached.INV_DATA) INV_DATA=cached.INV_DATA;
+      if(cached.CUS_MRR) CUS_MRR=cached.CUS_MRR;
+      if(cached.CMAP) CMAP=cached.CMAP;
+      if(cached.generatedAt){
+        const lu=document.getElementById('last-updated');
+        if(lu){const ts=new Date(cached.generatedAt*1000);lu.textContent=ts.toLocaleString('es-AR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}
+      }
+    }
+  }catch(e){}
   // Restore persisted filter state
   try{
     const saved=JSON.parse(localStorage.getItem('gl_state')||'{}');
