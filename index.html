@@ -594,32 +594,42 @@ function renderOverview(){
   const{fromTs:fs,toTs:ts}=getRange();
   const rangeMonths=(ts-fs)/2592000; // approx months
   const monthNames=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-  let activeTimelineSubs=uniqueActiveSubs(SUBS);
-  if(pf)activeTimelineSubs=activeTimelineSubs.filter(s=>pf.has(s.product));
+  // For active-at-close-of-month: count subs that are currently active/trialing/past_due
+  // Active-at-close-of-month: use INV_DATA invoice count per month.
+  // Each invoice = one active subscription that paid that month.
+  // More accurate than counting by creation date (which ignores cancellations).
+  const invByMonth={};
+  INV_DATA.forEach(r=>{
+    const d=new Date(r[0]*1000);
+    const mk=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    invByMonth[mk]=(invByMonth[mk]||0)+1;
+  });
   let bkts;
   if(rangeMonths>2){
-    // Monthly buckets for longer ranges
     const startD=new Date(fs*1000);
     const endD=new Date(ts*1000);
     bkts=[];
     let y=startD.getFullYear(),m=startD.getMonth();
     while(true){
       const bs=Math.floor(new Date(y,m,1)/1000);
-      const be=Math.floor(new Date(y,m+1,1)/1000);
       if(bs>ts)break;
       const label=monthNames[m]+(y!==new Date().getFullYear()?'/'+(y%100):'');
-      bkts.push({label,count:activeTimelineSubs.filter(s=>s.created<Math.min(be,ts)).length});
+      const mk=y+'-'+String(m+1).padStart(2,'0');
+      bkts.push({label,count:invByMonth[mk]||0});
       m++;if(m>11){m=0;y++;}
       if(y>endD.getFullYear()||(y===endD.getFullYear()&&m>endD.getMonth()+1))break;
     }
   } else {
-    // 8 equal buckets with day-month labels
+    // Short ranges: 8 equal buckets using active-status subs
+    const ACTIVE_STATUSES=new Set(['active','trialing','past_due']);
+    let atSubs=SUBS.filter(s=>ACTIVE_STATUSES.has(s.status));
+    if(pf)atSubs=atSubs.filter(s=>pf.has(s.product));
     bkts=Array.from({length:8},(_,i)=>{
       const bs=fs+Math.floor(i*(ts-fs)/8),be=fs+Math.floor((i+1)*(ts-fs)/8);
       const d=new Date(bs*1000);
       const day=String(d.getDate()).padStart(2,'0');
       const label=day+'-'+monthNames[d.getMonth()];
-      return{label,count:activeTimelineSubs.filter(s=>s.created<be).length};
+      return{label,count:atSubs.filter(s=>s.created<be).length};
     });
   }
   requestAnimationFrame(()=>{
@@ -871,12 +881,18 @@ function renderHistorial(){
 
   const labels=ms.map(m=>{const[y,mo]=m.month.split('-');return new Date(parseInt(y),parseInt(mo)-1).toLocaleDateString('es-AR',{month:'short',year:'2-digit'});});
   requestAnimationFrame(()=>{
-    const c1=document.getElementById('chart-hist-monthly');
-    if(c1)CHARTS.hm=new Chart(c1,{type:'bar',data:{labels,datasets:[{label:'Nuevas',data:ms.map(m=>m.new),backgroundColor:'rgba(108,99,255,.5)',borderColor:'#6c63ff',borderWidth:1,borderRadius:3,stack:'s'},{label:'Canceladas',data:ms.map(m=>-(m.canceled||0)),backgroundColor:'rgba(239,68,68,.4)',borderColor:'#ef4444',borderWidth:1,borderRadius:3,stack:'s'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,position:'top',labels:{boxWidth:10,padding:16,color:'#8b8a94'}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${Math.abs(ctx.raw)}`}}},scales:{x:{grid:{display:false},ticks:{autoSkip:true,maxTicksLimit:14,maxRotation:45,font:{size:10}}},y:{grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}}}});
-    const c2=document.getElementById('chart-hist-new');
-    if(c2)CHARTS.hn=new Chart(c2,{type:'line',data:{labels,datasets:[{label:'Nuevas',data:ms.map(m=>m.new),borderColor:'#6c63ff',backgroundColor:'rgba(108,99,255,.1)',borderWidth:2,fill:true,tension:.4,pointRadius:3,pointHoverRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{autoSkip:true,maxTicksLimit:6,font:{size:10}}},y:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}}}});
-    const c3=document.getElementById('chart-hist-cancel');
-    if(c3)CHARTS.hc=new Chart(c3,{type:'line',data:{labels,datasets:[{label:'Canceladas',data:ms.map(m=>m.canceled||0),borderColor:'#ef4444',backgroundColor:'rgba(239,68,68,.1)',borderWidth:2,fill:true,tension:.4,pointRadius:3,pointHoverRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{autoSkip:true,maxTicksLimit:6,font:{size:10}}},y:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}}}});
+    // Bar chart: Nuevas vs Canceladas por mes
+    const w1=document.getElementById('chart-hist-monthly');
+    if(w1){const nc1=document.createElement('canvas');w1.parentNode.replaceChild(nc1,w1);nc1.id='chart-hist-monthly';
+      CHARTS.hm=new Chart(nc1,{type:'bar',data:{labels,datasets:[{label:'Nuevas',data:ms.map(m=>m.new),backgroundColor:'rgba(108,99,255,.5)',borderColor:'#6c63ff',borderWidth:1,borderRadius:3,stack:'s'},{label:'Canceladas',data:ms.map(m=>-(m.canceled||0)),backgroundColor:'rgba(239,68,68,.4)',borderColor:'#ef4444',borderWidth:1,borderRadius:3,stack:'s'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,position:'top',labels:{boxWidth:10,padding:16,color:'#8b8a94'}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${Math.abs(ctx.raw)}`}}},scales:{x:{grid:{display:false},ticks:{autoSkip:true,maxTicksLimit:14,maxRotation:45,font:{size:10}}},y:{grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}}}});}
+    // Line chart: Nuevas por mes
+    const w2=document.getElementById('chart-hist-new');
+    if(w2){const nc2=document.createElement('canvas');w2.parentNode.replaceChild(nc2,w2);nc2.id='chart-hist-new';
+      CHARTS.hn=new Chart(nc2,{type:'line',data:{labels,datasets:[{label:'Nuevas',data:ms.map(m=>m.new),borderColor:'#6c63ff',backgroundColor:'rgba(108,99,255,.1)',borderWidth:2,fill:true,tension:.4,pointRadius:3,pointHoverRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>` Nuevas: ${ctx.raw}`}}},scales:{x:{grid:{display:false},ticks:{autoSkip:true,maxTicksLimit:6,font:{size:10}}},y:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}}}});}
+    // Line chart: Canceladas por mes
+    const w3=document.getElementById('chart-hist-cancel');
+    if(w3){const nc3=document.createElement('canvas');w3.parentNode.replaceChild(nc3,w3);nc3.id='chart-hist-cancel';
+      CHARTS.hc=new Chart(nc3,{type:'line',data:{labels,datasets:[{label:'Canceladas',data:ms.map(m=>m.canceled||0),borderColor:'#ef4444',backgroundColor:'rgba(239,68,68,.1)',borderWidth:2,fill:true,tension:.4,pointRadius:3,pointHoverRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>` Canceladas: ${ctx.raw}`}}},scales:{x:{grid:{display:false},ticks:{autoSkip:true,maxTicksLimit:6,font:{size:10}}},y:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}}}});}
     let running=0;
     document.getElementById('hist-tbody').innerHTML=ms.map(m=>{
       const net=(m.new||0)-(m.canceled||0);
