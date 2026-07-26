@@ -275,6 +275,11 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
         <div style="font-size:11px;color:var(--text3);margin-bottom:12px;margin-top:-8px">Importe neto cobrado este año (descontando cupones y comisión Stripe ~2.9%+$0.30)</div>
         <div class="cw" style="height:200px"><canvas id="chart-revenue" role="img" aria-label="Ingresos brutos en el tiempo"></canvas></div>
       </div>
+      <div class="card">
+        <div class="card-title"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v9l6 3"/></svg> Suscripciones activas por tipo de período</div>
+        <div class="cw" style="height:200px"><canvas id="chart-sub-type" role="img" aria-label="Mensual, trimestral, anual"></canvas></div>
+        <div class="status-list" id="subtype-list" style="margin-top:14px"></div>
+      </div>
       <div class="chart-row">
         <div class="card">
           <div class="card-title">Distribución por estado</div>
@@ -750,6 +755,62 @@ function renderOverview(){
               ctx2.font='bold 11px "DM Sans",sans-serif';
               ctx2.textAlign='center';
               ctx2.fillText('$'+(v>=1000?(v/1000).toFixed(0)+'k':Math.round(v)),x,y);
+              ctx2.restore();
+            });
+          }
+        }]
+      });
+    });
+  })();
+  // Distribución de activas por tipo de período (mensual/trimestral/anual)
+  (function buildSubTypeChart(){
+    dc('subtype');
+    const activeSubs=uniqueActiveSubs(allF);
+    function subTypeLabel(s){
+      if(s.interval==='year'&&s.interval_count===1)return'Anual';
+      if(s.interval==='month'&&s.interval_count===3)return'Trimestral';
+      if(s.interval==='month'&&s.interval_count===1)return'Mensual';
+      return'Otro';
+    }
+    const tm={};activeSubs.forEach(s=>{const l=subTypeLabel(s);tm[l]=(tm[l]||0)+1;});
+    const order=['Mensual','Trimestral','Anual','Otro'];
+    const te=order.filter(l=>tm[l]).map(l=>[l,tm[l]]);
+    const TC={Mensual:'#6c63ff',Trimestral:'#f59e0b',Anual:'#22c55e',Otro:'#4b5563'};
+    const totT=te.reduce((a,[,c])=>a+c,0);
+    document.getElementById('subtype-list').innerHTML=te.map(([l,c])=>`<div class="srow"><div class="sdot" style="background:${TC[l]||'#555'}"></div><div class="sname">${l}</div><div class="scnt">${c}</div><div class="spct">${totT>0?Math.round(c/totT*100):0}%</div></div>`).join('');
+    requestAnimationFrame(()=>{
+      const wrapT=document.getElementById('chart-sub-type');
+      if(!wrapT)return;
+      const tctx=document.createElement('canvas');wrapT.parentNode.replaceChild(tctx,wrapT);tctx.id='chart-sub-type';
+      CHARTS.subtype=new Chart(tctx,{
+        type:'doughnut',
+        data:{labels:te.map(([l])=>l),datasets:[{data:te.map(([,c])=>c),backgroundColor:te.map(([l])=>TC[l]||'#555'),borderWidth:2,borderColor:'#111113'}]},
+        options:{
+          responsive:true,
+          maintainAspectRatio:false,
+          cutout:'65%',
+          plugins:{
+            legend:{position:'bottom',labels:{color:'#c4c3cf',font:{size:11},padding:12,usePointStyle:true,pointStyle:'circle'}},
+            tooltip:{callbacks:{label:c=>{const pct=totT>0?Math.round(c.raw/totT*100):0;return` ${c.label}: ${c.raw} (${pct}%)`;}}}
+          }
+        },
+        plugins:[{
+          afterDraw(chart){
+            const ctx2=chart.ctx;
+            chart.data.datasets[0].data.forEach((v,i)=>{
+              if(!v)return;
+              const meta=chart.getDatasetMeta(0);
+              const arc=meta.data[i];
+              if(!arc)return;
+              const pos=arc.tooltipPosition();
+              ctx2.save();
+              ctx2.shadowColor='rgba(0,0,0,.6)';
+              ctx2.shadowBlur=4;
+              ctx2.fillStyle='#fff';
+              ctx2.font='bold 13px "DM Sans",sans-serif';
+              ctx2.textAlign='center';
+              ctx2.textBaseline='middle';
+              ctx2.fillText(v,pos.x,pos.y);
               ctx2.restore();
             });
           }
