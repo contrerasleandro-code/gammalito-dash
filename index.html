@@ -273,7 +273,7 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
       <div class="card">
         <div class="card-title"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Ingresos netos en el tiempo</div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:12px;margin-top:-8px">Importe neto cobrado este año (descontando cupones y comisión Stripe ~2.9%+$0.30)</div>
-        <div class="cw" style="height:200px"><canvas id="chart-revenue" role="img" aria-label="Ingresos netos en el tiempo"></canvas></div>
+        <div class="cw" style="height:280px"><canvas id="chart-revenue" role="img" aria-label="Ingresos netos en el tiempo"></canvas></div>
       </div>
       <div class="card">
         <div class="card-title"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v9l6 3"/></svg> Suscripciones activas por tipo de período</div>
@@ -573,22 +573,42 @@ function renderOverview(){
   let allF=SUBS;
   if(pf)allF=allF.filter(s=>pf.has(s.product));
   if(sf)allF=allF.filter(s=>s.status===sf);
-  const active=uniqueActiveSubs(allF).length;
-  const canceled=allF.filter(s=>s.status==='canceled').length;
-  // MRR: use actual paid amounts from invoices (CUS_MRR), filtered by product if needed
-  let mrr=0;
-  if(pf){
-    // Product filter: use raw sub prices discounted proportionally
-    const mrrSubs=SUBS.filter(s=>s.status==='active'&&pf.has(s.product));
-    const allActiveSubs=SUBS.filter(s=>s.status==='active');
-    const allMrrRaw=allActiveSubs.reduce((a,s)=>{const m=s.interval==='month'?s.amount/s.interval_count:s.interval==='year'?s.amount/12:s.amount;return a+m;},0);
-    const allMrrReal=Object.values(CUS_MRR).reduce((a,[ap,ic])=>a+ap/ic,0);
-    const discountRatio=allMrrRaw>0?allMrrReal/allMrrRaw:1;
-    mrr=mrrSubs.reduce((a,s)=>{const m=s.interval==='month'?s.amount/s.interval_count:s.interval==='year'?s.amount/12:s.amount;return a+m*discountRatio;},0);
-  } else {
-    mrr=Object.values(CUS_MRR).reduce((a,[ap,ic])=>a+ap/ic,0);
+
+  // Snapshot helper: unique (customer+product) subs that existed and weren't
+  // yet canceled as of a given point in time — same methodology used by the
+  // "Activas al cierre de cada mes" chart, so these metrics move with the
+  // Período/Productos/Estado filters instead of always reflecting "right now".
+  function snapshotActiveMap(ts){
+    const byKey=new Map();
+    allF.forEach(s=>{
+      if(s.created<=ts&&(s.canceled_at==null||s.canceled_at>ts)){
+        const key=(s.customer||'no_customer')+'|'+(s.product||'no_product');
+        const prev=byKey.get(key);
+        if(!prev||s.created<prev.created)byKey.set(key,s);
+      }
+    });
+    return byKey;
   }
-  const cr=allF.length>0?Math.round(canceled/allF.length*100):0;
+  const activeAtEndMap=snapshotActiveMap(toTs);
+  const active=activeAtEndMap.size;
+  const activeAtStart=snapshotActiveMap(fromTs-1).size;
+  // Cancellations that happened DURING the selected period (by canceled_at),
+  // not "ever canceled" across all of history.
+  const canceled=allF.filter(s=>s.canceled_at!=null&&s.canceled_at>=fromTs&&s.canceled_at<=toTs).length;
+  const cr=activeAtStart>0?Math.round(canceled/activeAtStart*100):(canceled>0?100:0);
+  // MRR: snapshot of active-as-of-period-end subs at list price, scaled by
+  // the current real-discount ratio (actual paid MRR vs raw list-price MRR)
+  // so period-scoped MRR still reflects real coupon/discount impact.
+  let mrr=0;
+  {
+    const activeEndSubs=[...activeAtEndMap.values()];
+    const rawMrrAtEnd=activeEndSubs.reduce((a,s)=>{const m=s.interval==='month'?s.amount/s.interval_count:s.interval==='year'?s.amount/12:s.amount;return a+m;},0);
+    const allActiveSubsNow=SUBS.filter(s=>s.status==='active');
+    const allMrrRawNow=allActiveSubsNow.reduce((a,s)=>{const m=s.interval==='month'?s.amount/s.interval_count:s.interval==='year'?s.amount/12:s.amount;return a+m;},0);
+    const allMrrRealNow=Object.values(CUS_MRR).reduce((a,[ap,ic])=>a+ap/ic,0);
+    const discountRatio=allMrrRawNow>0?allMrrRealNow/allMrrRawNow:1;
+    mrr=rawMrrAtEnd*discountRatio;
+  }
   // Count unique NEW customers (first sub in period) — same methodology as Stripe
   const firstSubByCustomer={};
   SUBS.forEach(s=>{const cid=s.customer||s.cus||'';if(!cid)return;if(!firstSubByCustomer[cid]||s.created<firstSubByCustomer[cid])firstSubByCustomer[cid]=s.created;});
@@ -754,7 +774,7 @@ function renderOverview(){
         options:{
           responsive:true,
           maintainAspectRatio:false,
-          layout:{padding:{top:24}},
+          layout:{padding:{top:40}},
           plugins:{
             legend:{display:false},
             tooltip:{callbacks:{label:ctx=>' '+fmt(ctx.raw*100)}}
@@ -770,19 +790,44 @@ function renderOverview(){
         },
         plugins:[{
           afterDraw(chart){
-            const ctx2=chart.ctx;
+            const ctx2=chart.ctx,area=chart.chartArea,meta=chart.getDatasetMeta(0);
+            const n=chart.data.datasets[0].data.length;
+            let lastX=null,lastY=null,lastOffset=12;
             chart.data.datasets[0].data.forEach((v,i)=>{
               if(!v)return;
-              const meta=chart.getDatasetMeta(0);
               const pt=meta.data[i];
               if(!pt)return;
-              const x=pt.x,y=Math.max(pt.y-12,chart.chartArea.top+10);
+              const text='$'+(v>=1000?(v/1000).toFixed(0)+'k':Math.round(v));
+              ctx2.font='bold 11px "DM Sans",sans-serif';
+              const textW=ctx2.measureText(text).width;
+              // Collision avoidance: if this label sits close to the previous
+              // one (both horizontally and vertically), push it further up
+              // so consecutive similar values don't overlap.
+              let offset=12;
+              if(lastX!=null){
+                const dx=Math.abs(pt.x-lastX);
+                const dy=Math.abs(pt.y-lastY);
+                if(dx<textW+8 && dy<18){
+                  offset=lastOffset+16;
+                }
+              }
+              const y=Math.max(pt.y-offset,area.top+10);
+              // Clamp horizontally so first/last labels don't get cut off
+              // by the canvas edge.
+              let align='center',x=pt.x;
+              if(i===0){align='left';x=Math.max(pt.x,area.left+2);}
+              else if(i===n-1){align='right';x=Math.min(pt.x,area.right-2);}
+              else{
+                if(pt.x-textW/2<area.left){align='left';x=area.left+2;}
+                else if(pt.x+textW/2>area.right){align='right';x=area.right-2;}
+              }
               ctx2.save();
               ctx2.fillStyle='#f0eff2';
               ctx2.font='bold 11px "DM Sans",sans-serif';
-              ctx2.textAlign='center';
-              ctx2.fillText('$'+(v>=1000?(v/1000).toFixed(0)+'k':Math.round(v)),x,y);
+              ctx2.textAlign=align;
+              ctx2.fillText(text,x,y);
               ctx2.restore();
+              lastX=pt.x;lastY=pt.y;lastOffset=offset;
             });
           }
         }]
