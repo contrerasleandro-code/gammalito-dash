@@ -359,24 +359,28 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
 
     <!-- CLIENTES -->
     <div id="pane-clientes" class="pane">
-      <div class="metrics-grid" id="cust-metrics"></div>
-      <div class="card">
-        <div class="search-box">
-          <svg class="search-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-          <input type="text" id="cust-search" placeholder="Buscar por nombre, email o ID..." oninput="filterCustomers()">
-        </div>
-        <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-          <select id="cust-status-f" style="height:32px;font-size:12px;padding:4px 24px 4px 10px;min-width:130px" onchange="filterCustomers()">
+      <div class="filters-bar">
+        <div class="fg"><label class="fl">Estado</label>
+          <select id="cust-status-f" onchange="filterCustomers()">
             <option value="">Todos los estados</option>
             <option value="active">Con activa</option>
             <option value="canceled">Solo canceladas</option>
             <option value="trialing">En prueba</option>
           </select>
-          <select id="cust-sort" style="height:32px;font-size:12px;padding:4px 24px 4px 10px;min-width:160px" onchange="filterCustomers()">
+        </div>
+        <div class="fg"><label class="fl">Ordenar</label>
+          <select id="cust-sort" onchange="filterCustomers()">
             <option value="recent">Más recientes</option>
             <option value="oldest">Más antiguos</option>
             <option value="most_subs">Más suscripciones</option>
           </select>
+        </div>
+      </div>
+      <div class="metrics-grid" id="cust-metrics"></div>
+      <div class="card">
+        <div class="search-box">
+          <svg class="search-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input type="text" id="cust-search" placeholder="Buscar por nombre, email o ID..." oninput="filterCustomers()">
         </div>
         <table class="cust-table">
           <thead><tr>
@@ -1161,17 +1165,22 @@ function buildCustomers(){
 }
 let ALL_CUSTS=null;
 function initClientes(){
-  if(ALL_CUSTS)return renderCustPage();
+  if(ALL_CUSTS)return filterCustomers();
   ALL_CUSTS=buildCustomers();
-  const active=ALL_CUSTS.filter(c=>c.mainStatus==='active').length;
-  const total=ALL_CUSTS.length;
-  const multiSub=ALL_CUSTS.filter(c=>c.subs.length>1).length;
+  filterCustomers();
+}
+function renderCustMetrics(list){
+  const total=list.length;
+  const active=list.filter(c=>c.mainStatus==='active').length;
+  const multiSub=list.filter(c=>c.subs.length>1).length;
+  const totalSubs=list.reduce((a,c)=>a+c.subs.length,0);
+  const avgSubs=total>0?(totalSubs/total).toFixed(1):'0.0';
+  const retentionPct=total>0?Math.round(active/total*100):0;
   document.getElementById('cust-metrics').innerHTML=`
     <div class="metric-card"><div class="mi purple">👥</div><div class="metric-label">Clientes únicos</div><div class="metric-value">${total}</div><div class="metric-sub"><span class="mbadge neutral">en base</span></div></div>
-    <div class="metric-card"><div class="mi green">✓</div><div class="metric-label">Con suscripción activa</div><div class="metric-value">${active}</div><div class="metric-sub"><span class="mbadge up">${Math.round(active/total*100)}% retención</span></div></div>
+    <div class="metric-card"><div class="mi green">✓</div><div class="metric-label">Con suscripción activa</div><div class="metric-value">${active}</div><div class="metric-sub"><span class="mbadge up">${retentionPct}% retención</span></div></div>
     <div class="metric-card"><div class="mi amber">↻</div><div class="metric-label">Reincidentes</div><div class="metric-value">${multiSub}</div><div class="metric-sub"><span class="mbadge neutral">+1 suscripción</span></div></div>
-    <div class="metric-card"><div class="mi blue">📦</div><div class="metric-label">Promedio subs/cliente</div><div class="metric-value">${(SUBS.length/total).toFixed(1)}</div><div class="metric-sub"><span class="mbadge neutral">721 subs totales</span></div></div>`;
-  filterCustomers();
+    <div class="metric-card"><div class="mi blue">📦</div><div class="metric-label">Promedio subs/cliente</div><div class="metric-value">${avgSubs}</div><div class="metric-sub"><span class="mbadge neutral">${totalSubs} subs totales</span></div></div>`;
 }
 function filterCustomers(){
   if(!ALL_CUSTS)return;
@@ -1188,6 +1197,7 @@ function filterCustomers(){
     if(sf==='trialing'&&c.mainStatus!=='trialing')return false;
     return true;
   });
+  renderCustMetrics(custFiltered);
   if(sort==='recent')custFiltered.sort((a,b)=>b.lastSub-a.lastSub);
   else if(sort==='oldest')custFiltered.sort((a,b)=>a.firstSub-b.firstSub);
   else if(sort==='most_subs')custFiltered.sort((a,b)=>b.subs.length-a.subs.length);
