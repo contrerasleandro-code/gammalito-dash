@@ -4,8 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Stripe Dashboard · GAMMALito</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
 :root{--bg:#0a0a0b;--bg2:#111113;--bg3:#18181c;--bg4:#1e1e24;--border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.12);--text:#f0eff2;--text2:#8b8a94;--text3:#55545e;--accent:#6c63ff;--accent2:#9d97ff;--green:#22c55e;--green-bg:rgba(34,197,94,0.1);--amber:#f59e0b;--amber-bg:rgba(245,158,11,0.1);--red:#ef4444;--red-bg:rgba(239,68,68,0.1);--blue:#3b82f6;}
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -512,12 +514,30 @@ function uniqueActiveSubs(rows){
   return [...byKey.values()];
 }
 
-Chart.defaults.color='#8b8a94';Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.font.size=12;
+// Chart.js se carga con `defer`, así que los defaults se setean recién en
+// DOMContentLoaded (los scripts defer siempre ejecutan antes de ese evento).
+function initChartDefaults(){
+  Chart.defaults.color='#8b8a94';Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.font.size=12;
+}
 const CHARTS={};
 function dc(k){if(CHARTS[k]){try{CHARTS[k].destroy();}catch(e){}delete CHARTS[k];}}
 function dca(){Object.keys(CHARTS).forEach(k=>dc(k));}
+// Destrucción por grupo: cada tab destruye SOLO sus propios charts. Antes,
+// dca() en renderOverview/renderComp mataba los charts de las otras pestañas
+// y al volver quedaban canvases en blanco.
+const CHART_GROUPS={overview:['tl','rev','subtype','donut'],comp:['cm','cmetric','cdnt','crate'],historial:['hm','hn','hc'],cupones:['cupbar']};
+function dcg(group){(CHART_GROUPS[group]||[]).forEach(dc);}
+// DATA_REV se incrementa en cada refresh de datos; TAB_SIG memoriza la firma
+// (datos + filtros) del último render de cada tab para saltear re-renders
+// idénticos al cambiar de pestaña.
+let DATA_REV=0;const TAB_SIG={};
 
 function fmt(c){return'$'+(c/100).toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:0});}
+// Escape HTML para todo texto que viene de datos externos (nombres/emails de
+// clientes de Stripe, nombres de cupones, productos). Los nombres los escribe
+// el cliente en el checkout → sin esto, un nombre como <img onerror=...>
+// se ejecutaría como HTML en la tabla de Clientes (XSS almacenado).
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
 // Tab switching
 const TABS=['overview','comp','historial','clientes','cupones'];
@@ -529,7 +549,8 @@ function switchTab(t){
   });
   const titles={overview:'Resumen general',comp:'Comparativa por producto',historial:'Historial mensual',clientes:'Clientes',cupones:'Desglose de cupones'};
   document.getElementById('topbar-title').textContent=titles[t];
-  if(t==='comp')renderComp();
+  if(t==='overview')renderOverview();
+  else if(t==='comp')renderComp();
   else if(t==='historial')renderHistorial();
   else if(t==='clientes')initClientes();
   else if(t==='cupones')initCupones();
@@ -544,7 +565,7 @@ function buildProdChecklist(){
   if(!list)return;
   const prev=new Set([...list.querySelectorAll('input[type=checkbox]')].filter(c=>c.checked).map(c=>c.value));
   const prods=[...new Set(SUBS.map(s=>s.product))].sort((a,b)=>(PM[a]||a).localeCompare(PM[b]||b));
-  list.innerHTML=prods.map(id=>`<label><input type="checkbox" value="${id}"${prev.has(id)?' checked':''} onchange="updateProdBtn()"> <span>${PM[id]||id}</span></label>`).join('');
+  list.innerHTML=prods.map(id=>`<label><input type="checkbox" value="${esc(id)}"${prev.has(id)?' checked':''} onchange="updateProdBtn()"> <span>${esc(PM[id]||id)}</span></label>`).join('');
   if(typeof updateProdBtn==='function')updateProdBtn();
 }
 buildProdChecklist();
@@ -630,10 +651,15 @@ function stripeOverrideAsOf(map,ts){
 }
 
 function renderOverview(){
-  dca();
   const{fromTs,toTs}=getRange();
   const pf=getSelectedProds();
   const sf=document.getElementById('sel-status').value;
+  // Firma del render: si los datos y los filtros no cambiaron y los charts
+  // siguen vivos, no hay nada que redibujar.
+  const sig=[DATA_REV,document.getElementById('sel-period').value,sf,pf?[...pf].sort().join(','):'all'].join('|');
+  if(TAB_SIG.overview===sig&&CHARTS.rev)return;
+  TAB_SIG.overview=sig;
+  dcg('overview');
   let fil=SUBS.filter(s=>s.created>=fromTs&&s.created<=toTs);
   if(pf)fil=fil.filter(s=>pf.has(s.product));
   if(sf)fil=fil.filter(s=>s.status===sf);
@@ -842,17 +868,20 @@ function renderOverview(){
     if(pf){
       const idx=getInvProdIndex();
       rows=rows.filter(r=>{const p=idx.get(r[0]);return p&&pf.has(p);});
-      const attributable=INV_DATA.filter(r=>r[0]>=fs&&r[0]<=ts&&getInvProdIndex().has(r[0])).reduce((a,r)=>a+r[4],0);
+      const attributable=INV_DATA.filter(r=>r[0]>=fs&&r[0]<=ts&&idx.has(r[0])).reduce((a,r)=>a+r[4],0);
       coverage=totalNetInRange>0?Math.round(attributable/totalNetInRange*100):0;
     }
+    // Bucketing en UNA sola pasada (Map por año*12+mes) en vez de un
+    // rows.filter() por cada mes del rango: O(facturas) en lugar de
+    // O(meses × facturas). Mismo resultado, mismos límites de mes local.
+    const byYm=new Map();
+    rows.forEach(r=>{const d=new Date(r[0]*1000);const k=d.getFullYear()*12+d.getMonth();byYm.set(k,(byYm.get(k)||0)+r[4]);});
     const startD=new Date(fs*1000),endD=new Date(ts*1000);
     const months=[];
     let y=startD.getFullYear(),m=startD.getMonth();
     while(y<endD.getFullYear()||(y===endD.getFullYear()&&m<=endD.getMonth())){
       const label=new Date(y,m,1).toLocaleDateString('es-AR',{month:'short'})+(y!==new Date().getFullYear()?'/'+(y%100):'');
-      const msStart=Math.floor(new Date(y,m,1)/1000);
-      const msEnd=Math.floor(new Date(y,m+1,1)/1000);
-      const net=rows.filter(r=>r[0]>=msStart&&r[0]<msEnd).reduce((a,r)=>a+r[4],0);
+      const net=byYm.get(y*12+m)||0;
       months.push({label,net});
       m++;if(m>11){m=0;y++;}
     }
@@ -1026,7 +1055,9 @@ function renderOverview(){
 let compView='total',compMetric='mrr';
 function setCV(v,btn){compView=v;['cv-total','cv-active','cv-canceled','cv-stacked'].forEach(id=>document.getElementById(id).className='ctrl-btn');btn.className='ctrl-btn active';renderComp();}
 function setCM(m,btn){compMetric=m;['cm-mrr','cm-rate','cm-ticket'].forEach(id=>document.getElementById(id).className='ctrl-btn');btn.className='ctrl-btn active';renderComp();}
+let PROD_STATS=null;
 function computeProdStats(){
+  if(PROD_STATS)return PROD_STATS;
   const stats={};
   [...new Set(SUBS.map(s=>s.product))].forEach(id=>{
     const s=SUBS.filter(x=>x.product===id);
@@ -1043,6 +1074,7 @@ function computeProdStats(){
     const cancelRate=total>0?Math.round(canceled/total*100):0;
     stats[id]={total,active,canceled,trialing,past_due,mrr,avgTicket,cancelRate};
   });
+  PROD_STATS=stats;
   return stats;
 }
 // Value labels for horizontal bar charts: draws the number at the end of each
@@ -1131,7 +1163,10 @@ function prodAvgPaid(id,listAvg){
   return listAvg*prodDiscountRatio(id);
 }
 function renderComp(){
-  dca();
+  const sig=[DATA_REV,compView,compMetric].join('|');
+  if(TAB_SIG.comp===sig&&CHARTS.cm&&CHARTS.cmetric)return;
+  TAB_SIG.comp=sig;
+  dcg('comp');
   const stats=computeProdStats();
   let prods=[...new Set(SUBS.map(s=>s.product))].map(id=>({id,...stats[id]})).filter(p=>p.total>0).sort((a,b)=>b.total-a.total);
   const labels=prods.map(p=>{const n=PM[p.id]||p.id;return n.length>14?n.slice(0,13)+'…':n;});
@@ -1164,12 +1199,14 @@ function renderComp(){
     if(c3)CHARTS.cdnt=new Chart(c3,{type:'doughnut',data:{labels:prods.map(p=>PM[p.id]),datasets:[{data:prods.map(p=>p.active),backgroundColor:colors,borderWidth:2,borderColor:'#111113'}]},options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const t=prods.reduce((a,p)=>a+p.active,0);return` ${ctx.label}: ${ctx.raw} (${Math.round(ctx.raw/t*100)}%)`;}}}}}});
     const c4=document.getElementById('chart-comp-rate');
     if(c4)CHARTS.crate=new Chart(c4,{type:'bar',data:{labels,datasets:[{label:'Activa %',data:prods.map(p=>p.total>0?Math.round(p.active/p.total*100):0),backgroundColor:'rgba(34,197,94,.3)',borderColor:'#22c55e',borderWidth:1.5,borderRadius:4},{label:'Cancelada %',data:prods.map(p=>p.cancelRate),backgroundColor:'rgba(75,85,99,.4)',borderColor:'#6b7280',borderWidth:1.5,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,position:'top',labels:{boxWidth:10,padding:16,color:'#8b8a94'}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${ctx.raw}%`}}},scales:{x:{grid:{display:false},ticks:{autoSkip:false,font:{size:10},maxRotation:35}},y:{beginAtZero:true,max:100,grid:{color:'rgba(255,255,255,.04)'},ticks:{callback:v=>v+'%'}}}}});
-    document.getElementById('prod-cards').innerHTML=prods.map((p,i)=>`<div class="prod-card"><div class="pc-header"><div class="pc-dot" style="background:${colors[i]}"></div><div class="pc-name">${PM[p.id]||p.id}</div></div><div class="pc-stats"><div class="pc-stat"><div class="pc-stat-label">TOTAL</div><div class="pc-stat-value">${p.total}</div></div><div class="pc-stat"><div class="pc-stat-label">ACTIVAS</div><div class="pc-stat-value green">${p.active}</div></div><div class="pc-stat"><div class="pc-stat-label">MRR</div><div class="pc-stat-value">${fmt(p.mrr)}</div></div><div class="pc-stat"><div class="pc-stat-label">CANCELACIÓN</div><div class="pc-stat-value ${p.cancelRate>60?'red':p.cancelRate>35?'amber':'green'}">${p.cancelRate}%</div></div></div></div>`).join('');
+    document.getElementById('prod-cards').innerHTML=prods.map((p,i)=>`<div class="prod-card"><div class="pc-header"><div class="pc-dot" style="background:${colors[i]}"></div><div class="pc-name">${esc(PM[p.id]||p.id)}</div></div><div class="pc-stats"><div class="pc-stat"><div class="pc-stat-label">TOTAL</div><div class="pc-stat-value">${p.total}</div></div><div class="pc-stat"><div class="pc-stat-label">ACTIVAS</div><div class="pc-stat-value green">${p.active}</div></div><div class="pc-stat"><div class="pc-stat-label">MRR</div><div class="pc-stat-value">${fmt(p.mrr)}</div></div><div class="pc-stat"><div class="pc-stat-label">CANCELACIÓN</div><div class="pc-stat-value ${p.cancelRate>60?'red':p.cancelRate>35?'amber':'green'}">${p.cancelRate}%</div></div></div></div>`).join('');
   });
 }
 
 // HISTORIAL
+let MONTHLY_STATS=null;
 function getMonthlyStats(){
+  if(MONTHLY_STATS)return MONTHLY_STATS;
   const months={};
   function ensure(m){if(!months[m])months[m]={month:m,new:0,canceled:0,active:0,trialing:0,past_due:0,mrr:0};}
   SUBS.forEach(s=>{
@@ -1197,11 +1234,15 @@ function getMonthlyStats(){
     const end=new Date(cur+'-01');
     while(d<=end){ensure(d.toISOString().slice(0,7));d.setMonth(d.getMonth()+1);}
   }
-  return Object.values(months).sort((a,b)=>a.month.localeCompare(b.month));
+  MONTHLY_STATS=Object.values(months).sort((a,b)=>a.month.localeCompare(b.month));
+  return MONTHLY_STATS;
 }
 
 function renderHistorial(){
-  ['hm','hn','hc'].forEach(k=>{if(CHARTS[k]){try{CHARTS[k].destroy();}catch(e){}delete CHARTS[k];}});
+  const sig=[DATA_REV,document.getElementById('hist-period')?.value||'all'].join('|');
+  if(TAB_SIG.historial===sig&&CHARTS.hm)return;
+  TAB_SIG.historial=sig;
+  dcg('historial');
   const allMs=getMonthlyStats();
 
   // Apply period filter (same logic as Resumen)
@@ -1395,13 +1436,13 @@ function renderCustPage(){
   const fd=d=>new Date(d*1000).toLocaleDateString('es-AR',{day:'2-digit',month:'short',year:'numeric'});
   document.getElementById('cust-tbody').innerHTML=page.map(c=>{
   const cm=CMAP[c.id];
-  const nameHtml=cm&&cm[0]?`<div style="font-size:13px;color:var(--text)">${cm[0]}</div><div class="cust-id" style="margin-top:2px">${c.id.slice(4,14)}…</div>`:`<div class="cust-id">${c.id}</div>`;
+  const nameHtml=cm&&cm[0]?`<div style="font-size:13px;color:var(--text)">${esc(cm[0])}</div><div class="cust-id" style="margin-top:2px">${esc(c.id.slice(4,14))}…</div>`:`<div class="cust-id">${esc(c.id)}</div>`;
   return`<tr>
     <td>${nameHtml}</td>
     <td style="font-family:'DM Mono',monospace">${c.subs.length}</td>
     <td style="font-family:'DM Mono',monospace">${c.months}</td>
     <td><span class="tag tag-${c.mainStatus}">${SL[c.mainStatus]||c.mainStatus}</span></td>
-    <td style="font-size:11px;color:var(--text3)">${c.products.slice(0,2).map(p=>PM[p]||p).join(', ')}${c.products.length>2?' +'+( c.products.length-2):''}</td>
+    <td style="font-size:11px;color:var(--text3)">${c.products.slice(0,2).map(p=>esc(PM[p]||p)).join(', ')}${c.products.length>2?' +'+( c.products.length-2):''}</td>
     <td style="font-size:12px;color:var(--text3)">${fd(c.firstSub)}</td>
     <td style="font-size:12px;color:var(--text3)">${fd(c.lastSub)}</td>
   </tr>`;
@@ -1455,15 +1496,25 @@ function getSelectedCupones(){
   const checked=checks.filter(c=>c.checked).map(c=>c.value);
   return checked.length===0||checked.length===checks.length?null:new Set(checked);
 }
+let CUP_INIT_REV=-1;
 function initCupones(){
-  const months=[...new Set(INV_DATA.map(r=>new Date(r[0]*1000).toISOString().slice(0,7)))].sort();
-  const mSel=document.getElementById('cup-month');
-  mSel.innerHTML='<option value="">Todos los meses</option>';
-  months.forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;mSel.appendChild(o);});
-  const cnames=[...new Set(INV_DATA.map(r=>r[3]).filter(Boolean))].sort();
-  const list=document.getElementById('cup-check-list');
-  if(list){
-    list.innerHTML=cnames.map(c=>`<label><input type="checkbox" value="${c}" onchange="updateCupBtn();renderCupones()"> <span>${c}</span></label>`).join('');
+  // Reconstruir los selectores solo cuando cambian los datos: evita trabajo
+  // repetido y deja de resetear la selección de cupones en cada cambio de tab.
+  if(CUP_INIT_REV!==DATA_REV){
+    CUP_INIT_REV=DATA_REV;
+    const months=[...new Set(INV_DATA.map(r=>new Date(r[0]*1000).toISOString().slice(0,7)))].sort();
+    const mSel=document.getElementById('cup-month');
+    const prevM=mSel.value;
+    mSel.innerHTML='<option value="">Todos los meses</option>';
+    months.forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;mSel.appendChild(o);});
+    if(prevM&&months.includes(prevM))mSel.value=prevM;
+    const cnames=[...new Set(INV_DATA.map(r=>r[3]).filter(Boolean))].sort();
+    const list=document.getElementById('cup-check-list');
+    if(list){
+      const prev=new Set([...list.querySelectorAll('input[type=checkbox]')].filter(c=>c.checked).map(c=>c.value));
+      list.innerHTML=cnames.map(c=>`<label><input type="checkbox" value="${esc(c)}"${prev.has(c)?' checked':''} onchange="updateCupBtn();renderCupones()"> <span>${esc(c)}</span></label>`).join('');
+      if(typeof updateCupBtn==='function')updateCupBtn();
+    }
   }
   renderCupones();
 }
@@ -1527,7 +1578,7 @@ function renderCupones(){
   });
   const rows=Object.values(byMonth).sort((a,b)=>b.disc-a.disc||a.month.localeCompare(b.month));
   document.getElementById('cup-tbody').innerHTML=rows.map(r=>`<tr>
-    <td style="font-weight:500;color:var(--accent2)">${r.coupon}</td>
+    <td style="font-weight:500;color:var(--accent2)">${esc(r.coupon)}</td>
     <td style="color:var(--text3)">${r.month}</td>
     <td style="font-family:'DM Mono',monospace">${r.count}</td>
     <td style="font-family:'DM Mono',monospace;color:var(--text2)">${fmt(r.subtotal)}</td>
@@ -1545,13 +1596,21 @@ const REFRESH_ENDPOINT = (window.GAMMALITO_API || '/api/refresh');
 
 function rerenderAll(){
   // reset memoized state so it's rebuilt from the new data
+  DATA_REV++;               // invalida las firmas de TODAS las pestañas
   ALL_CUSTS = null;
+  MONTHLY_STATS = null;
+  PROD_STATS = null;
   Object.keys(CHARTS).forEach(k=>{try{CHARTS[k].destroy();}catch(e){}delete CHARTS[k];});
-  renderOverview();
-  renderComp();
-  renderHistorial();
-  initClientes();
-  initCupones();
+  // Solo se re-renderiza la pestaña visible; las demás se reconstruyen solas
+  // al entrar porque su firma (DATA_REV) ya no coincide. Antes se redibujaban
+  // las 5 pestañas (12+ charts) en cada refresh, la mayoría ocultas.
+  const at=document.querySelector('.nav-item.active');
+  const t=at?at.id.replace('nav-',''):'overview';
+  if(t==='comp')renderComp();
+  else if(t==='historial')renderHistorial();
+  else if(t==='clientes')initClientes();
+  else if(t==='cupones')initCupones();
+  else renderOverview();
 }
 
 async function fetchAndRefresh(){
@@ -1561,7 +1620,7 @@ async function fetchAndRefresh(){
     const resp = await fetch(REFRESH_ENDPOINT, {cache:'no-store'});
     if(!resp.ok) throw new Error('HTTP '+resp.status);
     const data = await resp.json();
-    if(!data || !Array.isArray(data.RAW)) throw new Error('Respuesta inválida');
+    if(!validCache(data)) throw new Error('Respuesta inválida');
 
     RAW = dedupRaw(data.RAW);
     SUBS = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null}));
@@ -1571,6 +1630,8 @@ async function fetchAndRefresh(){
     ALL_CUSTS = null;   // rebuild Clientes tab from fresh data
     PROD_PAID = null;   // recompute per-product real-paid stats
     INV_PROD = null;    // rebuild invoice→product index
+    MONTHLY_STATS = null;
+    PROD_STATS = null;
     buildProdChecklist();
     updateHeaderMeta();
 
@@ -1602,16 +1663,32 @@ function requestRefresh(){
   closeOverlay();
   fetchAndRefresh();
 }
+// Validación estructural del snapshot cacheado: localStorage es escribible
+// por cualquier script que llegue a ejecutar en este origen, así que antes de
+// reemplazar los datos embebidos se verifica que cada fila tenga la forma
+// esperada. Una cache corrupta se descarta en lugar de romper el dashboard.
+function validCache(c){
+  if(!c||typeof c!=='object'||!Array.isArray(c.RAW)||!c.RAW.length)return false;
+  if(!c.RAW.every(r=>r&&typeof r==='object'&&typeof r.c==='number'&&typeof r.s==='string'&&typeof r.p==='string'))return false;
+  if(c.INV_DATA!=null&&!(Array.isArray(c.INV_DATA)&&c.INV_DATA.every(r=>Array.isArray(r)&&typeof r[0]==='number'&&typeof r[1]==='number')))return false;
+  if(c.CMAP!=null&&typeof c.CMAP!=='object')return false;
+  if(c.CUS_MRR!=null&&typeof c.CUS_MRR!=='object')return false;
+  return true;
+}
 document.addEventListener('DOMContentLoaded',()=>{
+  initChartDefaults(); // Chart.js (defer) ya está disponible acá
   // Restore persisted Stripe data snapshot (overrides the baked-in RAW if newer)
   try{
     const cached=JSON.parse(localStorage.getItem('gl_data')||'null');
-    if(cached && Array.isArray(cached.RAW) && cached.RAW.length){
+    if(validCache(cached)){
       RAW = dedupRaw(cached.RAW);
       SUBS = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null}));
+      DATA_REV++;       // los datos cambiaron: invalidar firmas de render
       ALL_CUSTS = null; // force Clientes tab to rebuild from the fresh data
       PROD_PAID = null; // recompute per-product real-paid stats
       INV_PROD = null;  // rebuild invoice→product index
+      MONTHLY_STATS = null;
+      PROD_STATS = null;
       if(cached.INV_DATA) INV_DATA=cached.INV_DATA;
       if(cached.CUS_MRR) CUS_MRR=cached.CUS_MRR;
       if(cached.CMAP) CMAP=cached.CMAP;
