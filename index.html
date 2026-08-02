@@ -197,6 +197,9 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
         <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
         Actualizado: <strong id="last-updated">28 jul 2026, 22:54</strong>
       </div>
+      <span id="persist-warning" title="El navegador rechazó guardar el snapshot localmente (posible límite de almacenamiento). Los datos se ven bien ahora, pero se perderán si recargás la página. Probá liberar espacio (otras pestañas/sitios que usen mucho localStorage) o volver a actualizar." style="display:none;color:#e5a04d;font-size:11px;font-weight:500;cursor:help;align-items:center;gap:4px">
+        ⚠ No se guardó localmente — se perderá al recargar
+      </span>
       <button class="btn-refresh" id="btn-refresh" onclick="fetchAndRefresh()" title="Actualizar datos desde Stripe">
         <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
         Actualizar
@@ -1635,11 +1638,30 @@ async function fetchAndRefresh(){
     buildProdChecklist();
     updateHeaderMeta();
 
-    // Persist fetched data so page reloads keep the latest snapshot
+    // Persist fetched data so page reloads keep the latest snapshot.
+    const ts2=data.generatedAt||Math.floor(Date.now()/1000);
+    // El save anterior tragaba cualquier error (típicamente QuotaExceededError)
+    // en silencio: la sesión seguía viéndose bien porque todo lo demás corre
+    // en memoria, pero al hacer F5 no había nada guardado. Ahora: se reintenta
+    // liberando espacio, y si igual falla, se avisa en pantalla en vez de
+    // fallar callado.
+    const persistPayload=JSON.stringify({RAW:data.RAW,INV_DATA:data.INV_DATA||null,CUS_MRR:data.CUS_MRR||null,CMAP:data.CMAP||null,generatedAt:ts2});
+    let persisted=false;
     try{
-      const ts2=data.generatedAt||Math.floor(Date.now()/1000);
-      localStorage.setItem('gl_data',JSON.stringify({RAW:data.RAW,INV_DATA:data.INV_DATA||null,CUS_MRR:data.CUS_MRR||null,CMAP:data.CMAP||null,generatedAt:ts2}));
-    }catch(e){}
+      localStorage.setItem('gl_data',persistPayload);
+      persisted=true;
+    }catch(e1){
+      console.warn('gl_data save failed, retrying after clearing old cache:',e1?.name||e1);
+      try{
+        localStorage.removeItem('gl_data'); // libera el espacio del snapshot anterior
+        localStorage.setItem('gl_data',persistPayload);
+        persisted=true;
+      }catch(e2){
+        console.error('gl_data save failed again — datos no persistirán tras un F5:',e2?.name||e2);
+      }
+    }
+    const persistWarn=document.getElementById('persist-warning');
+    if(persistWarn)persistWarn.style.display=persisted?'none':'inline-flex';
 
     rerenderAll();
 
@@ -1697,7 +1719,7 @@ document.addEventListener('DOMContentLoaded',()=>{
         if(lu){const ts=new Date(cached.generatedAt*1000);lu.textContent=ts.toLocaleString('es-AR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}
       }
     }
-  }catch(e){}
+  }catch(e){console.warn('No se pudo restaurar gl_data desde localStorage:',e?.name||e);}
   buildProdChecklist();
   updateHeaderMeta();
   // Restore persisted filter state
