@@ -535,14 +535,18 @@ function switchTab(t){
   try{saveState();}catch(e){}
 }
 
-// Populate product checklist dropdown
-(function(){
-  const prods=[...new Set(SUBS.map(s=>s.product))].sort((a,b)=>(PM[a]||a).localeCompare(PM[b]||b));
+// Populate product checklist dropdown. Called again after fresh data loads,
+// so products that only exist in the newer dataset (and not in the baked-in
+// RAW) still show up in the filter.
+function buildProdChecklist(){
   const list=document.getElementById('prod-check-list');
-  if(list){
-    list.innerHTML=prods.map(id=>`<label><input type="checkbox" value="${id}" onchange="updateProdBtn()"> <span>${PM[id]||id}</span></label>`).join('');
-  }
-})();
+  if(!list)return;
+  const prev=new Set([...list.querySelectorAll('input[type=checkbox]')].filter(c=>c.checked).map(c=>c.value));
+  const prods=[...new Set(SUBS.map(s=>s.product))].sort((a,b)=>(PM[a]||a).localeCompare(PM[b]||b));
+  list.innerHTML=prods.map(id=>`<label><input type="checkbox" value="${id}"${prev.has(id)?' checked':''} onchange="updateProdBtn()"> <span>${PM[id]||id}</span></label>`).join('');
+  if(typeof updateProdBtn==='function')updateProdBtn();
+}
+buildProdChecklist();
 // Close prod dropdown on outside click
 document.addEventListener('click',function(e){
   const dd=document.getElementById('prod-dropdown');
@@ -1002,12 +1006,83 @@ function computeProdStats(){
     const trialing=s.filter(x=>x.status==='trialing').length;
     const past_due=s.filter(x=>x.status==='past_due').length;
     const total=s.length;
-    const mrr=s.filter(x=>x.status==='active').reduce((a,x)=>{const m=x.interval==='month'?x.amount/x.interval_count:x.interval==='year'?x.amount/12:x.amount;return a+m;},0);
-    const avgTicket=total>0?s.reduce((a,x)=>a+x.amount,0)/total:0;
+    // MRR and ticket use amounts actually charged (post-coupon), not list price.
+    const mrrList=s.filter(x=>x.status==='active').reduce((a,x)=>{const m=x.interval==='month'?x.amount/x.interval_count:x.interval==='year'?x.amount/12:x.amount;return a+m;},0);
+    const mrr=mrrList*prodDiscountRatio(id);
+    const avgTicketList=total>0?s.reduce((a,x)=>a+x.amount,0)/total:0;
+    const avgTicket=total>0?prodAvgPaid(id,avgTicketList):0;
     const cancelRate=total>0?Math.round(canceled/total*100):0;
     stats[id]={total,active,canceled,trialing,past_due,mrr,avgTicket,cancelRate};
   });
   return stats;
+}
+// Value labels for horizontal bar charts: draws the number at the end of each
+// bar, flipping inside the bar when it would overflow the plot area.
+function hBarLabels(fmtFn){
+  return{
+    afterDraw(chart){
+      const ctx=chart.ctx,area=chart.chartArea;
+      chart.data.datasets.forEach((ds,di)=>{
+        const meta=chart.getDatasetMeta(di);
+        if(meta.hidden)return;
+        meta.data.forEach((el,i)=>{
+          const v=ds.data[i];
+          if(v==null||v===0)return;
+          const text=fmtFn?fmtFn(v):String(v);
+          ctx.save();
+          ctx.font='600 11px "DM Sans",sans-serif';
+          const w=ctx.measureText(text).width;
+          let x=el.x+6,align='left',color='#c4c3cf';
+          if(x+w>area.right){x=el.x-6;align='right';color='#f0eff2';}
+          ctx.fillStyle=color;
+          ctx.textAlign=align;
+          ctx.textBaseline='middle';
+          ctx.fillText(text,x,el.y);
+          ctx.restore();
+        });
+      });
+    }
+  };
+}
+// Real (post-discount) amounts per product. INV_DATA has no product field, so
+// invoices are matched to subscriptions by exact creation timestamp — a first
+// invoice is issued at the same instant the subscription is created. Only
+// unambiguous timestamps are used (all subs sharing that ts have one product).
+// Products with too few matched invoices fall back to the global paid/list
+// ratio so a single outlier can't distort their figures.
+let PROD_PAID=null;
+function getProdPaidStats(){
+  if(PROD_PAID)return PROD_PAID;
+  const byTs=new Map();
+  RAW.forEach(r=>{if(!byTs.has(r.c))byTs.set(r.c,[]);byTs.get(r.c).push(r);});
+  const per={};let gPaid=0,gList=0;
+  INV_DATA.forEach(r=>{
+    if(r[1]<=0)return;
+    gPaid+=r[1];gList+=r[1]+r[2];
+    const cands=byTs.get(r[0]);
+    if(!cands)return;
+    const prods=[...new Set(cands.map(c=>c.p))];
+    if(prods.length!==1)return;
+    const p=prods[0];
+    if(!per[p])per[p]={paid:0,list:0,n:0};
+    per[p].paid+=r[1];per[p].list+=r[1]+r[2];per[p].n++;
+  });
+  const globalRatio=gList>0?gPaid/gList:1;
+  PROD_PAID={per,globalRatio,MIN_N:5};
+  return PROD_PAID;
+}
+// Effective discount ratio for a product (paid ÷ list price).
+function prodDiscountRatio(id){
+  const{per,globalRatio,MIN_N}=getProdPaidStats();
+  const s=per[id];
+  return(s&&s.n>=MIN_N&&s.list>0)?s.paid/s.list:globalRatio;
+}
+// Average amount actually charged per invoice for a product.
+function prodAvgPaid(id,listAvg){
+  const{per,MIN_N}=getProdPaidStats();
+  const s=per[id];
+  if(s&&s.n>=MIN_N)return s.paid/s.n;
+  return listAvg*prodDiscountRatio(id);
 }
 function renderComp(){
   dca();
@@ -1027,18 +1102,18 @@ function renderComp(){
     const c1=document.getElementById('chart-comp-main');
     if(c1){
       if(compView==='stacked'){
-        CHARTS.cm=new Chart(c1,{type:'bar',data:{labels,datasets:[{label:'Activa',data:prods.map(p=>p.active),backgroundColor:'#22c55e',borderRadius:3},{label:'En prueba',data:prods.map(p=>p.trialing),backgroundColor:'#f59e0b',borderRadius:3},{label:'Vencida',data:prods.map(p=>p.past_due),backgroundColor:'#ef4444',borderRadius:3},{label:'Cancelada',data:prods.map(p=>p.canceled),backgroundColor:'#374151',borderRadius:3}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,position:'top',labels:{boxWidth:10,boxHeight:10,padding:16,color:'#8b8a94'}}},scales:{x:{stacked:true,grid:{color:'rgba(255,255,255,.04)'}},y:{stacked:true,grid:{display:false},ticks:{autoSkip:false}}}}});
+        CHARTS.cm=new Chart(c1,{type:'bar',data:{labels,datasets:[{label:'Activa',data:prods.map(p=>p.active),backgroundColor:'#22c55e',borderRadius:3},{label:'En prueba',data:prods.map(p=>p.trialing),backgroundColor:'#f59e0b',borderRadius:3},{label:'Vencida',data:prods.map(p=>p.past_due),backgroundColor:'#ef4444',borderRadius:3},{label:'Cancelada',data:prods.map(p=>p.canceled),backgroundColor:'#374151',borderRadius:3}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,position:'top',labels:{boxWidth:10,boxHeight:10,padding:16,color:'#8b8a94'}}},scales:{x:{stacked:true,grid:{color:'rgba(255,255,255,.04)'}},y:{stacked:true,grid:{display:false},ticks:{autoSkip:false}}}},plugins:[hBarLabels()]});
       } else {
-        CHARTS.cm=new Chart(c1,{type:'bar',data:{labels,datasets:[{label:'',data:mainData,backgroundColor:colors.map(c=>c+'99'),borderColor:colors,borderWidth:1.5,borderRadius:5}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'}},y:{grid:{display:false},ticks:{autoSkip:false}}}}});
+        CHARTS.cm=new Chart(c1,{type:'bar',data:{labels,datasets:[{label:'',data:mainData,backgroundColor:colors.map(c=>c+'99'),borderColor:colors,borderWidth:1.5,borderRadius:5}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,layout:{padding:{right:42}},plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'}},y:{grid:{display:false},ticks:{autoSkip:false}}}},plugins:[hBarLabels()]});
       }
     }
     let metricData,metricTitle,mf;
-    if(compMetric==='mrr'){metricData=prods.map(p=>Math.round(p.mrr/100));metricTitle='MRR por producto (USD)';mf=v=>'$'+v.toLocaleString('es-AR');}
+    if(compMetric==='mrr'){metricData=prods.map(p=>Math.round(p.mrr/100));metricTitle='MRR real por producto (USD, con descuentos)';mf=v=>'$'+v.toLocaleString('es-AR');}
     else if(compMetric==='cancel_rate'){metricData=prods.map(p=>p.cancelRate);metricTitle='Tasa de cancelación %';mf=v=>v+'%';}
-    else{metricData=prods.map(p=>Math.round(p.avgTicket/100));metricTitle='Ticket promedio (USD)';mf=v=>'$'+v.toLocaleString('es-AR');}
+    else{metricData=prods.map(p=>Math.round(p.avgTicket/100));metricTitle='Ticket promedio real (USD, con descuentos)';mf=v=>'$'+v.toLocaleString('es-AR');}
     document.getElementById('comp-metric-title').textContent=metricTitle;
     const c2=document.getElementById('chart-comp-metric');
-    if(c2)CHARTS.cmetric=new Chart(c2,{type:'bar',data:{labels,datasets:[{label:'',data:metricData,backgroundColor:'rgba(108,99,255,.25)',borderColor:'#6c63ff',borderWidth:1.5,borderRadius:5}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>` ${mf(ctx.raw)}`}}},scales:{x:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'},ticks:{callback:v=>mf(v)}},y:{grid:{display:false},ticks:{autoSkip:false}}}}});
+    if(c2)CHARTS.cmetric=new Chart(c2,{type:'bar',data:{labels,datasets:[{label:'',data:metricData,backgroundColor:'rgba(108,99,255,.25)',borderColor:'#6c63ff',borderWidth:1.5,borderRadius:5}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,layout:{padding:{right:52}},plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>` ${mf(ctx.raw)}`}}},scales:{x:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'},ticks:{callback:v=>mf(v)}},y:{grid:{display:false},ticks:{autoSkip:false}}}},plugins:[hBarLabels(mf)]});
     const c3=document.getElementById('chart-comp-donut');
     if(c3)CHARTS.cdnt=new Chart(c3,{type:'doughnut',data:{labels:prods.map(p=>PM[p.id]),datasets:[{data:prods.map(p=>p.active),backgroundColor:colors,borderWidth:2,borderColor:'#111113'}]},options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const t=prods.reduce((a,p)=>a+p.active,0);return` ${ctx.label}: ${ctx.raw} (${Math.round(ctx.raw/t*100)}%)`;}}}}}});
     const c4=document.getElementById('chart-comp-rate');
@@ -1442,11 +1517,15 @@ async function fetchAndRefresh(){
     const data = await resp.json();
     if(!data || !Array.isArray(data.RAW)) throw new Error('Respuesta inválida');
 
-    RAW = data.RAW;
+    RAW = dedupRaw(data.RAW);
     SUBS = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null}));
     INV_DATA = data.INV_DATA || INV_DATA;
     CUS_MRR = data.CUS_MRR || CUS_MRR;
     CMAP = data.CMAP || CMAP;
+    ALL_CUSTS = null;   // rebuild Clientes tab from fresh data
+    PROD_PAID = null;   // recompute per-product real-paid stats
+    buildProdChecklist();
+    updateHeaderMeta();
 
     // Persist fetched data so page reloads keep the latest snapshot
     try{
@@ -1484,6 +1563,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       RAW = dedupRaw(cached.RAW);
       SUBS = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null}));
       ALL_CUSTS = null; // force Clientes tab to rebuild from the fresh data
+      PROD_PAID = null; // recompute per-product real-paid stats
       if(cached.INV_DATA) INV_DATA=cached.INV_DATA;
       if(cached.CUS_MRR) CUS_MRR=cached.CUS_MRR;
       if(cached.CMAP) CMAP=cached.CMAP;
@@ -1493,6 +1573,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       }
     }
   }catch(e){}
+  buildProdChecklist();
   updateHeaderMeta();
   // Restore persisted filter state
   try{
