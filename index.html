@@ -183,7 +183,7 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
       Cupones
     </button>
   </div>
-  <div class="sidebar-footer"><div class="pulse-dot"></div><div><div>721 subs · abr 2025 – may 2026</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:'DM Mono',monospace">build.285 · 1722595200</div></div></div>
+  <div class="sidebar-footer"><div class="pulse-dot"></div><div><div>721 subs · abr 2025 – may 2026</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:'DM Mono',monospace">build.286 · 1786066675</div></div></div>
 </aside>
 
 <main class="main">
@@ -492,7 +492,7 @@ function updateHeaderMeta(){
   const tb=document.getElementById('topbar-sub');
   if(tb)tb.textContent=SUBS.length+' suscripciones · todos los productos';
   const sf=document.querySelector('.sidebar-footer');
-  if(sf)sf.innerHTML='<div class="pulse-dot"></div><div><div>'+SUBS.length+' subs · '+fmtMY(minC)+' – '+fmtMY(maxC)+'</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:\'DM Mono\',monospace">build.285 · 1722595200</div></div></div>';
+  if(sf)sf.innerHTML='<div class="pulse-dot"></div><div><div>'+SUBS.length+' subs · '+fmtMY(minC)+' – '+fmtMY(maxC)+'</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:\'DM Mono\',monospace">build.286 · 1786066675</div></div></div>';
   // Staleness banner: warn when the newest record is older than 3 days, since
   // stale embedded data has repeatedly been mistaken for calculation bugs.
   const banner=document.getElementById('stale-banner');
@@ -1639,7 +1639,10 @@ async function fetchAndRefresh(){
     updateHeaderMeta();
 
     // Persist fetched data so page reloads keep the latest snapshot.
-    const ts2=data.generatedAt||Math.floor(Date.now()/1000);
+    // Se normaliza a epoch en segundos antes de guardar, así el snapshot
+    // siempre tiene un formato consistente sin importar qué devuelva la API.
+    const gdNow=parseGeneratedAt(data.generatedAt);
+    const ts2=gdNow?Math.floor(gdNow.getTime()/1000):Math.floor(Date.now()/1000);
     // El save anterior tragaba cualquier error (típicamente QuotaExceededError)
     // en silencio: la sesión seguía viéndose bien porque todo lo demás corre
     // en memoria, pero al hacer F5 no había nada guardado. Ahora: se reintenta
@@ -1676,8 +1679,8 @@ async function fetchAndRefresh(){
 
     rerenderAll();
 
-    const ts = (typeof data.generatedAt==='number'&&isFinite(data.generatedAt)) ? new Date(data.generatedAt*1000) : new Date();
-    const fmtTs = ts.toLocaleString('es-AR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    const ts = parseGeneratedAt(data.generatedAt) || new Date();
+    const fmtTs = fmtStamp(ts);
     const lu = document.getElementById('last-updated');
     if(lu) lu.textContent = fmtTs;
   }catch(err){
@@ -1718,6 +1721,24 @@ function cacheRejectReason(c){
   if(c.CUS_MRR!=null&&typeof c.CUS_MRR!=='object')return 'CUS_MRR no es un objeto';
   return null;
 }
+// El endpoint puede devolver generatedAt como string ISO
+// ("2026-08-07T01:34:48.637Z"), como epoch en segundos o en milisegundos.
+// Antes sólo se aceptaba el número en segundos, así que con el string ISO
+// la etiqueta "Actualizado" nunca se refrescaba al recargar y parecía que
+// los datos habían vuelto atrás (aunque en realidad se restauraban bien).
+function parseGeneratedAt(v){
+  if(typeof v==='number'&&isFinite(v)){
+    // <1e12 → segundos; >=1e12 → milisegundos
+    const d=new Date(v<1e12?v*1000:v);
+    return isFinite(d.getTime())?d:null;
+  }
+  if(typeof v==='string'&&v){
+    const d=new Date(v);
+    return isFinite(d.getTime())?d:null;
+  }
+  return null;
+}
+function fmtStamp(d){return d.toLocaleString('es-AR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}
 function validCache(c){return cacheRejectReason(c)===null;}
 document.addEventListener('DOMContentLoaded',()=>{
   initChartDefaults(); // Chart.js (defer) ya está disponible acá
@@ -1748,9 +1769,12 @@ document.addEventListener('DOMContentLoaded',()=>{
       if(cached.INV_DATA) INV_DATA=cached.INV_DATA;
       if(cached.CUS_MRR) CUS_MRR=cached.CUS_MRR;
       if(cached.CMAP) CMAP=cached.CMAP;
-      if(typeof cached.generatedAt==='number'&&isFinite(cached.generatedAt)){
+      const gd=parseGeneratedAt(cached.generatedAt);
+      if(gd){
         const lu=document.getElementById('last-updated');
-        if(lu){const ts=new Date(cached.generatedAt*1000);lu.textContent=ts.toLocaleString('es-AR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}
+        if(lu)lu.textContent=fmtStamp(gd);
+      }else if(cached.generatedAt!=null){
+        console.warn('[gl_data] generatedAt con formato no reconocido:',cached.generatedAt);
       }
     }
   }catch(e){console.warn('No se pudo restaurar gl_data desde localStorage:',e?.name||e);}
