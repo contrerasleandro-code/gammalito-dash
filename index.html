@@ -1646,20 +1646,31 @@ async function fetchAndRefresh(){
     // liberando espacio, y si igual falla, se avisa en pantalla en vez de
     // fallar callado.
     const persistPayload=JSON.stringify({RAW:data.RAW,INV_DATA:data.INV_DATA||null,CUS_MRR:data.CUS_MRR||null,CMAP:data.CMAP||null,generatedAt:ts2});
+    console.log('[gl_data] Intentando guardar',(persistPayload.length/1024).toFixed(0)+' KB');
+    // Verificación por lectura: algunos navegadores (Edge con Tracking
+    // Prevention, InPrivate, storage particionado) aceptan el setItem sin
+    // tirar error pero después no conservan el valor. Sin releer, eso pasa
+    // por "guardado exitoso" y el problema recién se ve al hacer F5.
+    const trySave=()=>{
+      localStorage.setItem('gl_data',persistPayload);
+      const back=localStorage.getItem('gl_data');
+      if(back===null)throw new Error('el navegador descartó el valor (releído como null)');
+      if(back.length!==persistPayload.length)throw new Error('guardado incompleto: '+back.length+' de '+persistPayload.length+' bytes');
+      return true;
+    };
     let persisted=false;
     try{
-      localStorage.setItem('gl_data',persistPayload);
-      persisted=true;
+      persisted=trySave();
     }catch(e1){
-      console.warn('gl_data save failed, retrying after clearing old cache:',e1?.name||e1);
+      console.warn('[gl_data] Falló el guardado, reintentando tras liberar el snapshot anterior:',e1?.name||e1?.message||e1);
       try{
         localStorage.removeItem('gl_data'); // libera el espacio del snapshot anterior
-        localStorage.setItem('gl_data',persistPayload);
-        persisted=true;
+        persisted=trySave();
       }catch(e2){
-        console.error('gl_data save failed again — datos no persistirán tras un F5:',e2?.name||e2);
+        console.error('[gl_data] Falló de nuevo — los datos NO van a sobrevivir un F5:',e2?.name||e2?.message||e2);
       }
     }
+    if(persisted)console.log('[gl_data] Guardado y verificado por relectura ✓');
     const persistWarn=document.getElementById('persist-warning');
     if(persistWarn)persistWarn.style.display=persisted?'none':'inline-flex';
 
@@ -1689,20 +1700,43 @@ function requestRefresh(){
 // por cualquier script que llegue a ejecutar en este origen, así que antes de
 // reemplazar los datos embebidos se verifica que cada fila tenga la forma
 // esperada. Una cache corrupta se descarta en lugar de romper el dashboard.
-function validCache(c){
-  if(!c||typeof c!=='object'||!Array.isArray(c.RAW)||!c.RAW.length)return false;
-  if(!c.RAW.every(r=>r&&typeof r==='object'&&typeof r.c==='number'&&typeof r.s==='string'&&typeof r.p==='string'))return false;
-  if(c.INV_DATA!=null&&!(Array.isArray(c.INV_DATA)&&c.INV_DATA.every(r=>Array.isArray(r)&&typeof r[0]==='number'&&typeof r[1]==='number')))return false;
-  if(c.CMAP!=null&&typeof c.CMAP!=='object')return false;
-  if(c.CUS_MRR!=null&&typeof c.CUS_MRR!=='object')return false;
-  return true;
+// Devuelve null si el snapshot es válido, o un string con el motivo del
+// rechazo. Antes devolvía false a secas y el snapshot se descartaba en
+// silencio: si la validación era la que fallaba, no había forma de saberlo.
+function cacheRejectReason(c){
+  if(!c||typeof c!=='object')return 'no es un objeto';
+  if(!Array.isArray(c.RAW))return 'RAW no es un array';
+  if(!c.RAW.length)return 'RAW está vacío';
+  const badIdx=c.RAW.findIndex(r=>!(r&&typeof r==='object'&&typeof r.c==='number'&&typeof r.s==='string'&&typeof r.p==='string'));
+  if(badIdx>=0)return 'RAW['+badIdx+'] con forma inesperada: '+JSON.stringify(c.RAW[badIdx]).slice(0,120);
+  if(c.INV_DATA!=null){
+    if(!Array.isArray(c.INV_DATA))return 'INV_DATA no es un array';
+    const bi=c.INV_DATA.findIndex(r=>!(Array.isArray(r)&&typeof r[0]==='number'&&typeof r[1]==='number'));
+    if(bi>=0)return 'INV_DATA['+bi+'] con forma inesperada: '+JSON.stringify(c.INV_DATA[bi]).slice(0,120);
+  }
+  if(c.CMAP!=null&&typeof c.CMAP!=='object')return 'CMAP no es un objeto';
+  if(c.CUS_MRR!=null&&typeof c.CUS_MRR!=='object')return 'CUS_MRR no es un objeto';
+  return null;
 }
+function validCache(c){return cacheRejectReason(c)===null;}
 document.addEventListener('DOMContentLoaded',()=>{
   initChartDefaults(); // Chart.js (defer) ya está disponible acá
   // Restore persisted Stripe data snapshot (overrides the baked-in RAW if newer)
   try{
-    const cached=JSON.parse(localStorage.getItem('gl_data')||'null');
+    // --- Diagnóstico de arranque (mirá esto en la consola tras un F5) ---
+    let rawStr=null;
+    try{ rawStr=localStorage.getItem('gl_data'); }
+    catch(e){ console.error('[gl_data] localStorage NO es accesible para leer:',e?.name||e); }
+    if(rawStr===null){
+      console.warn('[gl_data] No hay snapshot guardado (la clave no existe). Si acabás de actualizar los datos antes del F5, significa que el navegador descartó el guardado — revisá Tracking Prevention / modo InPrivate / borrado de datos al cerrar.');
+    }else{
+      console.log('[gl_data] Snapshot encontrado:',(rawStr.length/1024).toFixed(0)+' KB');
+    }
+    const cached=JSON.parse(rawStr||'null');
+    const reason=cached?cacheRejectReason(cached):'sin snapshot';
+    if(cached&&reason)console.error('[gl_data] Snapshot DESCARTADO por validación →',reason);
     if(validCache(cached)){
+      console.log('[gl_data] Snapshot restaurado OK · generatedAt =',cached.generatedAt,'· subs =',cached.RAW.length);
       RAW = dedupRaw(cached.RAW);
       SUBS = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null}));
       DATA_REV++;       // los datos cambiaron: invalidar firmas de render
