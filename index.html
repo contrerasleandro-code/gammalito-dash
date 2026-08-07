@@ -182,8 +182,12 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
       <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="2"/><path d="M9 12h6M9 16h4"/></svg>
       Cupones
     </button>
+    <button class="nav-item" id="nav-cashflow" onclick="switchTab('cashflow')">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      Cash Flow
+    </button>
   </div>
-  <div class="sidebar-footer"><div class="pulse-dot"></div><div><div>721 subs · abr 2025 – may 2026</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:'DM Mono',monospace">build.286 · 1786066675</div></div></div>
+  <div class="sidebar-footer"><div class="pulse-dot"></div><div><div>721 subs · abr 2025 – may 2026</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:'DM Mono',monospace">build.290 · 1786066675</div></div></div>
 </aside>
 
 <main class="main">
@@ -229,6 +233,10 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
       <button class="tab-btn" id="tab-cupones" onclick="switchTab('cupones')">
         <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="2"/></svg>
         Cupones
+      </button>
+      <button class="tab-btn" id="tab-cashflow" onclick="switchTab('cashflow')">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        Cash Flow
       </button>
     </div>
 
@@ -459,6 +467,50 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
         </div>
       </div>
     </div>
+
+    <!-- CASH FLOW -->
+    <div id="pane-cashflow" class="pane">
+      <div class="filters-bar">
+        <div class="fg"><label class="fl">Período</label>
+          <select id="cf-period" onchange="onCfPeriodChange()">
+            <option value="next30">Próximos 30 días</option>
+            <option value="month_end">Hasta fin de mes</option>
+            <option value="custom">Rango personalizado</option>
+          </select>
+        </div>
+        <div class="fg" id="cf-from-wrap" style="display:none"><label class="fl">Desde</label>
+          <input type="date" id="cf-from" onchange="renderCashflow()">
+        </div>
+        <div class="fg" id="cf-to-wrap" style="display:none"><label class="fl">Hasta</label>
+          <input type="date" id="cf-to" onchange="renderCashflow()">
+        </div>
+        <div class="fg"><label class="fl">Vista</label>
+          <select id="cf-granularity" onchange="renderCashflow()">
+            <option value="1">Diaria</option>
+            <option value="7">Semanal</option>
+          </select>
+        </div>
+        <button class="btn-apply" onclick="renderCashflow()" style="height:36px">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          Proyectar
+        </button>
+      </div>
+      <div class="metrics-grid" id="cf-metrics"></div>
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-title"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 4-4"/></svg> Cash flow proyectado</div>
+        <div class="cw" style="height:220px"><canvas id="chart-cf-bar" role="img"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Detalle</div>
+        <div class="card-sub" id="cf-sub"></div>
+        <div style="overflow-x:auto">
+          <table class="cust-table" id="cf-table" style="min-width:900px"></table>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:12px;line-height:1.5">
+          Proyección basada en renovaciones futuras de suscripciones activas y en trial (ancla = fecha de creación + intervalo real de cobro). Montos marcados con * son estimados (cliente sin match en <code>CUS_MRR</code>; se aplica el descuento promedio real observado). Excluye suscripciones con cancelación ya registrada antes de la fecha de renovación. Neto = cobrado × 0.971 − $0.30 por transacción.
+        </div>
+      </div>
+    </div>
   </div>
 </main>
 </div>
@@ -492,7 +544,7 @@ function updateHeaderMeta(){
   const tb=document.getElementById('topbar-sub');
   if(tb)tb.textContent=SUBS.length+' suscripciones · todos los productos';
   const sf=document.querySelector('.sidebar-footer');
-  if(sf)sf.innerHTML='<div class="pulse-dot"></div><div><div>'+SUBS.length+' subs · '+fmtMY(minC)+' – '+fmtMY(maxC)+'</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:\'DM Mono\',monospace">build.286 · 1786066675</div></div></div>';
+  if(sf)sf.innerHTML='<div class="pulse-dot"></div><div><div>'+SUBS.length+' subs · '+fmtMY(minC)+' – '+fmtMY(maxC)+'</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:\'DM Mono\',monospace">build.290 · 1786066675</div></div></div>';
   // Staleness banner: warn when the newest record is older than 3 days, since
   // stale embedded data has repeatedly been mistaken for calculation bugs.
   const banner=document.getElementById('stale-banner');
@@ -528,7 +580,7 @@ function dca(){Object.keys(CHARTS).forEach(k=>dc(k));}
 // Destrucción por grupo: cada tab destruye SOLO sus propios charts. Antes,
 // dca() en renderOverview/renderComp mataba los charts de las otras pestañas
 // y al volver quedaban canvases en blanco.
-const CHART_GROUPS={overview:['tl','rev','subtype','donut'],comp:['cm','cmetric','cdnt','crate'],historial:['hm','hn','hc'],cupones:['cupbar']};
+const CHART_GROUPS={overview:['tl','rev','subtype','donut'],comp:['cm','cmetric','cdnt','crate'],historial:['hm','hn','hc'],cupones:['cupbar'],cashflow:['cfbar']};
 function dcg(group){(CHART_GROUPS[group]||[]).forEach(dc);}
 // DATA_REV se incrementa en cada refresh de datos; TAB_SIG memoriza la firma
 // (datos + filtros) del último render de cada tab para saltear re-renders
@@ -543,20 +595,21 @@ function fmt(c){return'$'+(c/100).toLocaleString('es-AR',{minimumFractionDigits:
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
 // Tab switching
-const TABS=['overview','comp','historial','clientes','cupones'];
+const TABS=['overview','comp','historial','clientes','cupones','cashflow'];
 function switchTab(t){
   TABS.forEach(x=>{
     document.getElementById('pane-'+x).className='pane'+(x===t?' active':'');
     document.getElementById('tab-'+x).className='tab-btn'+(x===t?' active':'');
     document.getElementById('nav-'+x).className='nav-item'+(x===t?' active':'');
   });
-  const titles={overview:'Resumen general',comp:'Comparativa por producto',historial:'Historial mensual',clientes:'Clientes',cupones:'Desglose de cupones'};
+  const titles={overview:'Resumen general',comp:'Comparativa por producto',historial:'Historial mensual',clientes:'Clientes',cupones:'Desglose de cupones',cashflow:'Cash flow proyectado'};
   document.getElementById('topbar-title').textContent=titles[t];
   if(t==='overview')renderOverview();
   else if(t==='comp')renderComp();
   else if(t==='historial')renderHistorial();
   else if(t==='clientes')initClientes();
   else if(t==='cupones')initCupones();
+  else if(t==='cashflow')initCashflow();
   try{saveState();}catch(e){}
 }
 
@@ -1590,6 +1643,148 @@ function renderCupones(){
     <td style="font-family:'DM Mono',monospace;color:var(--amber)">${fmt(r.net)}</td>
   </tr>`).join('');
 }
+let CF_INIT_REV=-1;
+function initCashflow(){
+  if(CF_INIT_REV!==DATA_REV){
+    CF_INIT_REV=DATA_REV;
+    onCfPeriodChange();
+  }
+  renderCashflow();
+}
+// Shows/hides the custom Desde/Hasta inputs and, for the two presets,
+// silently fills them (they're still used internally as the source of
+// truth for renderCashflow, just not editable by the user).
+function onCfPeriodChange(){
+  const period=document.getElementById('cf-period').value;
+  const fromWrap=document.getElementById('cf-from-wrap'),toWrap=document.getElementById('cf-to-wrap');
+  const fromEl=document.getElementById('cf-from'),toEl=document.getElementById('cf-to');
+  const today=new Date();
+  const todayStr=today.toISOString().slice(0,10);
+  if(period==='next30'){
+    fromWrap.style.display='none';toWrap.style.display='none';
+    fromEl.value=todayStr;
+    const d=new Date(today.getTime()+30*86400000);
+    toEl.value=d.toISOString().slice(0,10);
+  } else if(period==='month_end'){
+    fromWrap.style.display='none';toWrap.style.display='none';
+    fromEl.value=todayStr;
+    const lastDay=new Date(Date.UTC(today.getUTCFullYear(),today.getUTCMonth()+1,0));
+    toEl.value=lastDay.toISOString().slice(0,10);
+  } else {
+    fromWrap.style.display='';toWrap.style.display='';
+    if(!fromEl.value)fromEl.value=todayStr;
+    if(!toEl.value){const d=new Date(today.getTime()+30*86400000);toEl.value=d.toISOString().slice(0,10);}
+  }
+  renderCashflow();
+}
+// Projects future renewal charges for every subscription that is currently
+// active or trialing. Anchor = `created` (≈ billing_cycle_anchor in Stripe);
+// renewals land every `interval_count` months (or *12 for interval='year')
+// after that anchor. Uses the same "still active at ts" test as the rest of
+// the dashboard: created<=ts && (canceled_at==null || canceled_at>ts).
+function addMonthsTs(ts,months){
+  const d=new Date(ts*1000);
+  const day=d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth()+months);
+  const daysInMonth=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,0)).getUTCDate();
+  d.setUTCDate(Math.min(day,daysInMonth));
+  return Math.floor(d.getTime()/1000);
+}
+function projectCashflow(winStartTs,winEndTs){
+  const nowTs=Math.floor(Date.now()/1000);
+  const byKey=new Map();
+  SUBS.forEach(s=>{
+    if(!(s.status==='active'||s.status==='trialing'))return;
+    const key=(s.customer||'')+'|'+(s.product||'')+'|'+s.created;
+    if(!byKey.has(key))byKey.set(key,s);
+  });
+  const liveSubs=[...byKey.values()].filter(s=>s.canceled_at==null||s.canceled_at>nowTs);
+  let sumReal=0,sumList=0;
+  liveSubs.forEach(s=>{
+    const mrr=CUS_MRR[s.customer];
+    if(mrr){sumReal+=mrr[0];sumList+=s.amount;}
+  });
+  const ratio=sumList>0?sumReal/sumList:0.55;
+  const events=[];
+  liveSubs.forEach(s=>{
+    const monthsPerCycle=(s.interval==='year'?12:1)*s.interval_count;
+    let k=1,d=addMonthsTs(s.created,monthsPerCycle),iter=0;
+    while(d<winStartTs&&iter<80){k++;d=addMonthsTs(s.created,monthsPerCycle*k);iter++;}
+    while(d<winEndTs&&iter<200){
+      if(s.canceled_at==null||s.canceled_at>d){
+        const mrr=CUS_MRR[s.customer];
+        const cents=mrr?mrr[0]:Math.round(s.amount*ratio);
+        events.push({date:d,cents,estimated:!mrr,product:s.product,cycleMonths:monthsPerCycle});
+      }
+      k++;iter++;d=addMonthsTs(s.created,monthsPerCycle*k);
+    }
+  });
+  return{events,ratio};
+}
+let CASHFLOW_SIG='';
+function renderCashflow(){
+  const fromEl=document.getElementById('cf-from'),toEl=document.getElementById('cf-to');
+  if(!fromEl.value||!toEl.value)return;
+  const bucketDays=parseInt(document.getElementById('cf-granularity').value,10);
+  const period=document.getElementById('cf-period').value;
+  const sig=[DATA_REV,fromEl.value,toEl.value,bucketDays].join('|');
+  if(sig===CASHFLOW_SIG)return;
+  CASHFLOW_SIG=sig;
+  dc('cfbar');
+  const winStartTs=Math.floor(new Date(fromEl.value+'T00:00:00Z').getTime()/1000);
+  // Hasta es inclusivo: sumamos un día para que el rango cubra todo el día "Hasta".
+  const winEndTs=Math.floor(new Date(toEl.value+'T00:00:00Z').getTime()/1000)+86400;
+  const totalDays=Math.round((winEndTs-winStartTs)/86400);
+  const numBuckets=Math.ceil(totalDays/bucketDays);
+  const{events,ratio}=projectCashflow(winStartTs,winEndTs);
+  const buckets=[];
+  for(let i=0;i<numBuckets;i++){
+    const bs=winStartTs+i*bucketDays*86400;
+    const be=Math.min(bs+bucketDays*86400,winEndTs)-86400;
+    buckets.push({idx:i+1,start:bs,end:be,count:0,quarterly:0,charged:0,net:0,estimated:0});
+  }
+  events.forEach(ev=>{
+    const i=Math.min(numBuckets-1,Math.floor((ev.date-winStartTs)/(bucketDays*86400)));
+    if(i<0)return;
+    const b=buckets[i];
+    b.count++;if(ev.cycleMonths===3)b.quarterly++;b.charged+=ev.cents;b.net+=Math.round(ev.cents*0.971-30);
+    if(ev.estimated)b.estimated++;
+  });
+  const totCount=buckets.reduce((a,b)=>a+b.count,0);
+  const totQuarterly=buckets.reduce((a,b)=>a+b.quarterly,0);
+  const totNet=buckets.reduce((a,b)=>a+b.net,0);
+  const totEstimated=buckets.reduce((a,b)=>a+b.estimated,0);
+  const fmtDay=ts=>new Date(ts*1000).toLocaleDateString('es-AR',{day:'2-digit',month:'short',timeZone:'UTC'});
+  document.getElementById('cf-metrics').innerHTML=`
+    <div class="metric-card"><div class="mi purple">🔁</div><div class="metric-label">Cobros proyectados</div><div class="metric-value">${totCount}</div><div class="metric-sub"><span class="mbadge neutral">${totalDays} días</span></div></div>
+    <div class="metric-card"><div class="mi green">📈</div><div class="metric-label">Neto proyectado</div><div class="metric-value" style="font-size:22px">${fmt(totNet)}</div><div class="metric-sub"><span class="mbadge neutral">post-fees Stripe</span></div></div>
+    <div class="metric-card"><div class="mi amber">✳️</div><div class="metric-label">Estimados (sin match)</div><div class="metric-value">${totEstimated}</div><div class="metric-sub"><span class="mbadge warn">ratio ~${Math.round(ratio*100)}% del precio lista</span></div></div>`;
+  const periodLabel=period==='next30'?'Próximos 30 días':period==='month_end'?'Hasta fin de mes':'Rango personalizado';
+  document.getElementById('cf-sub').textContent=periodLabel+' · del '+fmtDay(winStartTs)+' al '+fmtDay(winEndTs-86400)+' · vista '+(bucketDays===1?'diaria':'semanal');
+  const colLabel=b=>bucketDays===1?fmtDay(b.start):('S'+b.idx+'<br><span style="font-weight:400;color:var(--text3);font-size:10px">'+fmtDay(b.start)+'–'+fmtDay(b.end)+'</span>');
+  const head='<thead><tr><th>Métrica</th>'+buckets.map(b=>`<th>${colLabel(b)}</th>`).join('')+'<th>Total</th></tr></thead>';
+  const rowCount='<tr><td style="font-weight:500">Cobros</td>'+buckets.map(b=>`<td style="font-family:\'DM Mono\',monospace">${b.count}</td>`).join('')+`<td style="font-family:'DM Mono',monospace;font-weight:600">${totCount}</td></tr>`;
+  const rowQuarterly='<tr><td style="font-weight:500">Cantidad de trimestrales</td>'+buckets.map(b=>`<td style="font-family:\'DM Mono\',monospace;color:var(--text2)">${b.quarterly}</td>`).join('')+`<td style="font-family:'DM Mono',monospace;font-weight:600;color:var(--text2)">${totQuarterly}</td></tr>`;
+  const rowNet='<tr><td style="font-weight:500">Neto (post-fees)</td>'+buckets.map(b=>`<td style="font-family:\'DM Mono\',monospace;color:var(--green)">${fmt(b.net)}${b.estimated?'*':''}</td>`).join('')+`<td style="font-family:'DM Mono',monospace;font-weight:600;color:var(--green)">${fmt(totNet)}</td></tr>`;
+  document.getElementById('cf-table').innerHTML=head+'<tbody>'+rowCount+rowQuarterly+rowNet+'</tbody>';
+  requestAnimationFrame(()=>{
+    const ctx=document.getElementById('chart-cf-bar');
+    if(ctx){
+      const labels=buckets.map(b=>bucketDays===1?fmtDay(b.start):'S'+b.idx);
+      CHARTS.cfbar=new Chart(ctx,{data:{labels,datasets:[
+        {type:'bar',label:'Neto',data:buckets.map(b=>b.net/100),backgroundColor:'rgba(245,158,11,.25)',borderColor:'#f59e0b',borderWidth:1.5,borderRadius:4,yAxisID:'y'},
+        {type:'line',label:'Cobros',data:buckets.map(b=>b.count),borderColor:'#6c63ff',backgroundColor:'#6c63ff',borderWidth:2,pointRadius:bucketDays===1?2:3,tension:.25,yAxisID:'y1'}
+      ]},options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:true,position:'top',labels:{boxWidth:10,boxHeight:10,padding:16,color:'#8b8a94'}},
+          tooltip:{callbacks:{label:ctx=>ctx.dataset.label==='Cobros'?` Cobros: ${ctx.raw}`:` ${ctx.dataset.label}: $${ctx.raw.toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:0})}`}}},
+        scales:{x:{grid:{display:false},ticks:{autoSkip:bucketDays===1,maxRotation:0}},
+          y:{position:'left',grid:{color:'rgba(255,255,255,.04)'},ticks:{callback:v=>'$'+(v>=1000?Math.round(v/1000)+'k':v)}},
+          y1:{position:'right',grid:{display:false},ticks:{precision:0}}}}});
+    }
+  });
+}
+
 // Init
 // URL of the serverless refresh endpoint. If this page is served from the
 // same Vercel project as /api/refresh, a relative path works. Otherwise,
