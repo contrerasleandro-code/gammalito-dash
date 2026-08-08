@@ -1,1 +1,41 @@
+name: Refresh Stripe data into index.html
 
+on:
+  workflow_dispatch: {}   # botón "Run workflow" manual en la pestaña Actions de GitHub
+  schedule:
+    - cron: '0 9 * * *'   # todos los días 09:00 UTC (~06:00 ART) — ajustá el horario si querés
+
+permissions:
+  contents: write   # necesario para que el Action pueda comitear/pushear
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Refresh Stripe data and bake into index.html
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+        run: node scripts/refresh-and-bake.mjs
+
+      - name: Commit and push if index.html changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- index.html; then
+            echo "Sin cambios en index.html — no hay nada para comitear."
+          else
+            git add index.html
+            git commit -m "chore: refresh Stripe data [automated]"
+            git push
+          fi
