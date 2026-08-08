@@ -99,23 +99,59 @@ export function buildInvData(invoices, activeCustomerIds) {
   });
 }
 
-// NOTA — bug conocido, sin resolver a propósito (ver mensaje del chat):
-// esto guarda item.price.unit_amount, que es precio de LISTA, no el precio
-// real pagado con cupón. El CUS_MRR ya horneado en index.html SÍ tiene
-// precios con descuento (viene de una generación anterior). Hasta que se
-// decida cómo recalcularlo (¿tomar el último invoice pagado del cliente,
-// como ya hace buildInvData?), esta función se deja igual que en el
-// refresh.js original para no introducir un cambio de comportamiento no
-// pedido.
-export function buildCusMrr(subs) {
+// CUS_MRR = monto REAL cobrado por ciclo, por cliente: { cus_X: [cents, interval_count] }
+//
+// Importante: NO usa item.price.unit_amount (precio de LISTA). Con ~45% de
+// descuento promedio por cupones, el precio de lista infla la proyección de
+// forma significativa. En su lugar toma el amount_paid de la última factura
+// real de cada suscripción.
+//
+// Solo cuenta facturas de ciclo/creación de suscripción (subscription_cycle,
+// subscription_create) — ignora prorrateos y facturas de cambio de plan, que
+// tienen montos parciales y no representan el cobro recurrente.
+//
+// Si un cliente no tiene ninguna factura utilizable, se OMITE del mapa a
+// propósito: el dashboard detecta la ausencia, aplica el ratio de descuento
+// promedio observado, y marca ese monto con un asterisco. Es preferible un
+// estimado marcado que un precio de lista silenciosamente inflado.
+export function buildCusMrr(subs, invoices) {
+  const BILLING_REASONS_OK = new Set(['subscription_cycle', 'subscription_create']);
+
+  // sub_id -> factura pagada más reciente que representa un cobro de ciclo
+  const latestBySub = new Map();
+  for (const inv of invoices) {
+    if (!inv.amount_paid || inv.amount_paid <= 0) continue;
+    if (inv.billing_reason && !BILLING_REASONS_OK.has(inv.billing_reason)) continue;
+    // apiVersion 2024-06-20: el sub va en inv.subscription; versiones nuevas
+    // lo mueven a inv.parent.subscription_details.subscription — soportamos ambas.
+    const subRef =
+      inv.subscription ?? inv.parent?.subscription_details?.subscription ?? null;
+    const subId = typeof subRef === 'string' ? subRef : subRef?.id;
+    if (!subId) continue;
+    const prev = latestBySub.get(subId);
+    if (!prev || inv.created > prev.created) {
+      latestBySub.set(subId, { created: inv.created, amount: inv.amount_paid });
+    }
+  }
+
   const out = {};
   for (const s of subs) {
     if (s.status !== 'active' && s.status !== 'trialing') continue;
     const item = s.items.data[0];
     if (!item) continue;
+    const hit = latestBySub.get(s.id);
+    if (!hit) continue; // sin factura real -> se omite, el dashboard lo estima
     const custId = typeof s.customer === 'string' ? s.customer : s.customer.id;
-    out[custId] = [item.price.unit_amount, item.price.recurring?.interval_count || 1];
+    const intervalCount = item.price.recurring?.interval_count || 1;
+    // Si un cliente tiene varias suscripciones, nos quedamos con el cobro más
+    // reciente entre todas (mismo criterio que el resto del dashboard).
+    const existing = out[custId];
+    if (!existing || hit.created > (existing[2] || 0)) {
+      out[custId] = [hit.amount, intervalCount, hit.created];
+    }
   }
+  // Recortamos el timestamp auxiliar: el formato final es [cents, interval_count]
+  for (const k of Object.keys(out)) out[k] = [out[k][0], out[k][1]];
   return out;
 }
 
@@ -147,7 +183,7 @@ export async function fetchStripeDataset() {
   return {
     RAW: buildRaw(subs),
     INV_DATA: buildInvData(invoices, activeCustomerIds),
-    CUS_MRR: buildCusMrr(subs),
+    CUS_MRR: buildCusMrr(subs, invoices),
     CMAP: buildCmap(invoices),
     counts: { subscriptions: subs.length, invoices: invoices.length },
   };
