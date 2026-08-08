@@ -187,7 +187,7 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
       Cash Flow
     </button>
   </div>
-  <div class="sidebar-footer"><div class="pulse-dot"></div><div><div>721 subs · abr 2025 – may 2026</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:'DM Mono',monospace">build.290 · 1786066675</div></div></div>
+  <div class="sidebar-footer"><div class="pulse-dot"></div><div><div>721 subs · abr 2025 – may 2026</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:'DM Mono',monospace">build.292 · 1786066675</div></div></div>
 </aside>
 
 <main class="main">
@@ -535,7 +535,7 @@ let RAW=[{"c":1785279285,"s":"active","p":"prod_TuHNjZlIfwH37V","a":40000,"i":"m
 // overlapping data refreshes can inject the same subscription twice.
 function dedupRaw(rows){const seen=new Set();return rows.filter(r=>{const k=r.c+'|'+(r.cus||'')+'|'+r.p+'|'+r.s+'|'+(r.ca||'');if(seen.has(k))return false;seen.add(k);return true;});}
 RAW=dedupRaw(RAW);
-let SUBS=RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null}));
+let SUBS=RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null,sub_id:r.id||null,current_period_end:r.cpe||null}));
 // Keep the topbar/sidebar counters in sync with the real dataset instead of
 // hardcoded values that go stale after each data refresh.
 function updateHeaderMeta(){
@@ -544,7 +544,7 @@ function updateHeaderMeta(){
   const tb=document.getElementById('topbar-sub');
   if(tb)tb.textContent=SUBS.length+' suscripciones · todos los productos';
   const sf=document.querySelector('.sidebar-footer');
-  if(sf)sf.innerHTML='<div class="pulse-dot"></div><div><div>'+SUBS.length+' subs · '+fmtMY(minC)+' – '+fmtMY(maxC)+'</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:\'DM Mono\',monospace">build.290 · 1786066675</div></div></div>';
+  if(sf)sf.innerHTML='<div class="pulse-dot"></div><div><div>'+SUBS.length+' subs · '+fmtMY(minC)+' – '+fmtMY(maxC)+'</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:\'DM Mono\',monospace">build.292 · 1786066675</div></div></div>';
   // Staleness banner: warn when the newest record is older than 3 days, since
   // stale embedded data has repeatedly been mistaken for calculation bugs.
   const banner=document.getElementById('stale-banner');
@@ -1693,11 +1693,18 @@ function addMonthsTs(ts,months){
 }
 function projectCashflow(winStartTs,winEndTs){
   const nowTs=Math.floor(Date.now()/1000);
+  // Dedup by customer+product only (NOT +created) — same convention as
+  // uniqueActiveSubs(). Stripe's raw export contains ~85 near-duplicate rows
+  // per customer+product (created timestamps off by ~1s, likely a pagination
+  // artifact from the data pull), which were previously double-counting
+  // revenue here. Keep the earliest `created` record per pair, like the rest
+  // of the dashboard does.
   const byKey=new Map();
   SUBS.forEach(s=>{
     if(!(s.status==='active'||s.status==='trialing'))return;
-    const key=(s.customer||'')+'|'+(s.product||'')+'|'+s.created;
-    if(!byKey.has(key))byKey.set(key,s);
+    const key=(s.customer||'no_customer')+'|'+(s.product||'no_product');
+    const prev=byKey.get(key);
+    if(!prev||s.created<prev.created)byKey.set(key,s);
   });
   const liveSubs=[...byKey.values()].filter(s=>s.canceled_at==null||s.canceled_at>nowTs);
   let sumReal=0,sumList=0;
@@ -1709,15 +1716,23 @@ function projectCashflow(winStartTs,winEndTs){
   const events=[];
   liveSubs.forEach(s=>{
     const monthsPerCycle=(s.interval==='year'?12:1)*s.interval_count;
-    let k=1,d=addMonthsTs(s.created,monthsPerCycle),iter=0;
-    while(d<winStartTs&&iter<80){k++;d=addMonthsTs(s.created,monthsPerCycle*k);iter++;}
+    // Prefer the REAL next renewal date from Stripe (current_period_end),
+    // stored as `cpe` in RAW since the sub_id/current_period_end refresh
+    // patch. current_period_end IS the next scheduled charge, so k starts
+    // at 0. Older cached data without it falls back to reconstructing the
+    // next charge as created + 1 cycle (k starts at 1) — an approximation
+    // that can drift from Stripe's real anchor.
+    const hasReal=!!s.current_period_end;
+    const baseTs=hasReal?s.current_period_end:s.created;
+    let k=hasReal?0:1,d=addMonthsTs(baseTs,monthsPerCycle*k),iter=0;
+    while(d<winStartTs&&iter<80){k++;d=addMonthsTs(baseTs,monthsPerCycle*k);iter++;}
     while(d<winEndTs&&iter<200){
       if(s.canceled_at==null||s.canceled_at>d){
         const mrr=CUS_MRR[s.customer];
         const cents=mrr?mrr[0]:Math.round(s.amount*ratio);
-        events.push({date:d,cents,estimated:!mrr,product:s.product,cycleMonths:monthsPerCycle});
+        events.push({date:d,cents,estimated:!mrr,product:s.product,cycleMonths:monthsPerCycle,reconstructed:!hasReal});
       }
-      k++;iter++;d=addMonthsTs(s.created,monthsPerCycle*k);
+      k++;iter++;d=addMonthsTs(baseTs,monthsPerCycle*k);
     }
   });
   return{events,ratio};
@@ -1755,13 +1770,15 @@ function renderCashflow(){
   const totQuarterly=buckets.reduce((a,b)=>a+b.quarterly,0);
   const totNet=buckets.reduce((a,b)=>a+b.net,0);
   const totEstimated=buckets.reduce((a,b)=>a+b.estimated,0);
+  const totReconstructed=events.filter(e=>e.reconstructed).length;
   const fmtDay=ts=>new Date(ts*1000).toLocaleDateString('es-AR',{day:'2-digit',month:'short',timeZone:'UTC'});
   document.getElementById('cf-metrics').innerHTML=`
     <div class="metric-card"><div class="mi purple">🔁</div><div class="metric-label">Cobros proyectados</div><div class="metric-value">${totCount}</div><div class="metric-sub"><span class="mbadge neutral">${totalDays} días</span></div></div>
     <div class="metric-card"><div class="mi green">📈</div><div class="metric-label">Neto proyectado</div><div class="metric-value" style="font-size:22px">${fmt(totNet)}</div><div class="metric-sub"><span class="mbadge neutral">post-fees Stripe</span></div></div>
     <div class="metric-card"><div class="mi amber">✳️</div><div class="metric-label">Estimados (sin match)</div><div class="metric-value">${totEstimated}</div><div class="metric-sub"><span class="mbadge warn">ratio ~${Math.round(ratio*100)}% del precio lista</span></div></div>`;
   const periodLabel=period==='next30'?'Próximos 30 días':period==='month_end'?'Hasta fin de mes':'Rango personalizado';
-  document.getElementById('cf-sub').textContent=periodLabel+' · del '+fmtDay(winStartTs)+' al '+fmtDay(winEndTs-86400)+' · vista '+(bucketDays===1?'diaria':'semanal');
+  const dateNote=totReconstructed>0?' · '+totReconstructed+'/'+events.length+' cobros con fecha reconstruida (sin current_period_end real — refrescá los datos para precisión exacta)':'';
+  document.getElementById('cf-sub').textContent=periodLabel+' · del '+fmtDay(winStartTs)+' al '+fmtDay(winEndTs-86400)+' · vista '+(bucketDays===1?'diaria':'semanal')+dateNote;
   const colLabel=b=>bucketDays===1?fmtDay(b.start):('S'+b.idx+'<br><span style="font-weight:400;color:var(--text3);font-size:10px">'+fmtDay(b.start)+'–'+fmtDay(b.end)+'</span>');
   const head='<thead><tr><th>Métrica</th>'+buckets.map(b=>`<th>${colLabel(b)}</th>`).join('')+'<th>Total</th></tr></thead>';
   const rowCount='<tr><td style="font-weight:500">Cobros</td>'+buckets.map(b=>`<td style="font-family:\'DM Mono\',monospace">${b.count}</td>`).join('')+`<td style="font-family:'DM Mono',monospace;font-weight:600">${totCount}</td></tr>`;
@@ -1821,7 +1838,7 @@ async function fetchAndRefresh(){
     if(!validCache(data)) throw new Error('Respuesta inválida');
 
     RAW = dedupRaw(data.RAW);
-    SUBS = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null}));
+    SUBS = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null,sub_id:r.id||null,current_period_end:r.cpe||null}));
     INV_DATA = data.INV_DATA || INV_DATA;
     CUS_MRR = data.CUS_MRR || CUS_MRR;
     CMAP = data.CMAP || CMAP;
@@ -1954,7 +1971,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     if(validCache(cached)){
       console.log('[gl_data] Snapshot restaurado OK · generatedAt =',cached.generatedAt,'· subs =',cached.RAW.length);
       RAW = dedupRaw(cached.RAW);
-      SUBS = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null}));
+      SUBS = RAW.map(r=>({created:r.c,status:r.s,product:r.p,amount:r.a,interval:r.i,interval_count:r.n,customer:r.cus,canceled_at:r.ca||null,sub_id:r.id||null,current_period_end:r.cpe||null}));
       DATA_REV++;       // los datos cambiaron: invalidar firmas de render
       ALL_CUSTS = null; // force Clientes tab to rebuild from the fresh data
       PROD_PAID = null; // recompute per-product real-paid stats
