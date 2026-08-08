@@ -1,4 +1,6 @@
-// /api/refresh.js — incluye canceled_at (campo "ca") en RAW
+// /api/refresh.js — incluye canceled_at (campo "ca"), sub_id (campo "id")
+// y current_period_end real (campo "cpe") en RAW, para que Cash Flow use la
+// fecha de renovación real de Stripe en vez de reconstruirla desde "created".
 import Stripe from 'stripe';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
@@ -50,6 +52,8 @@ function buildRaw(subs) {
         i: item.price.recurring?.interval || 'month',
         n: item.price.recurring?.interval_count || 1,
         cus: typeof s.customer === 'string' ? s.customer : s.customer.id,
+        id: s.id,
+        cpe: item.current_period_end,
       };
       // Incluir canceled_at si existe (campo "ca")
       if (s.canceled_at) entry.ca = s.canceled_at;
