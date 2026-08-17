@@ -199,7 +199,7 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
       Cash Flow
     </button>
   </div>
-  <div class="sidebar-footer"><div class="pulse-dot"></div><div><div>721 subs · abr 2025 – may 2026</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:'DM Mono',monospace">build.295 · 1786995959</div></div></div>
+  <div class="sidebar-footer"><div class="pulse-dot"></div><div><div>721 subs · abr 2025 – may 2026</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:'DM Mono',monospace">build.297 · 1786998335</div></div></div>
 </aside>
 
 <main class="main">
@@ -394,6 +394,25 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
     <!-- CLIENTES -->
     <div id="pane-clientes" class="pane">
       <div class="filters-bar">
+        <div class="fg"><label class="fl">Período</label>
+          <select id="cust-period-f" onchange="onCustPeriodChange()">
+            <option value="">Todo el tiempo</option>
+            <option value="this_month">Este mes</option>
+            <option value="last_month">Último mes</option>
+            <option value="7">Últimos 7 días</option>
+            <option value="30">Últimos 30 días</option>
+            <option value="90">Últimos 90 días</option>
+            <option value="180">Últimos 6 meses</option>
+            <option value="365">Último año</option>
+            <option value="custom">Rango personalizado</option>
+          </select>
+        </div>
+        <div class="fg" id="cust-period-from-wrap" style="display:none"><label class="fl">Desde</label>
+          <input type="date" id="cust-period-from" onchange="filterCustomers()">
+        </div>
+        <div class="fg" id="cust-period-to-wrap" style="display:none"><label class="fl">Hasta</label>
+          <input type="date" id="cust-period-to" onchange="filterCustomers()">
+        </div>
         <div class="fg"><label class="fl">Estado</label>
           <select id="cust-status-f" onchange="filterCustomers()">
             <option value="">Todos los estados</option>
@@ -419,7 +438,7 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
           </div>
         </div>
       </div>
-      <div class="metrics-grid" id="cust-metrics"></div>
+      <div class="metrics-grid" id="cust-metrics" style="grid-template-columns:repeat(5,1fr)"></div>
       <div class="card">
         <div class="search-box">
           <svg class="search-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -580,7 +599,7 @@ function updateHeaderMeta(){
   const tb=document.getElementById('topbar-sub');
   if(tb)tb.textContent=SUBS.length+' suscripciones · todos los productos';
   const sf=document.querySelector('.sidebar-footer');
-  if(sf)sf.innerHTML='<div class="pulse-dot"></div><div><div>'+SUBS.length+' subs · '+fmtMY(minC)+' – '+fmtMY(maxC)+'</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:\'DM Mono\',monospace">build.295 · 1786995959</div></div></div>';
+  if(sf)sf.innerHTML='<div class="pulse-dot"></div><div><div>'+SUBS.length+' subs · '+fmtMY(minC)+' – '+fmtMY(maxC)+'</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:\'DM Mono\',monospace">build.297 · 1786998335</div></div></div>';
   // Staleness banner: warn when the newest record is older than 3 days, since
   // stale embedded data has repeatedly been mistaken for calculation bugs.
   const banner=document.getElementById('stale-banner');
@@ -727,6 +746,10 @@ function getRange(){
   else if(v==='ytd'){from=new Date(now.getFullYear(),0,1);}
   else if(v==='all'){from=new Date(0);}
   else{from=new Date(Date.now()-parseInt(v)*864e5);}
+  // Nunca mostrar más allá de "ahora": "Este mes" y otros períodos que
+  // terminan en una fecha futura del calendario (fin de mes, etc.) se
+  // recortan al momento actual para no generar días/meses vacíos por venir.
+  if(to.getTime()>now.getTime())to=now;
   return{fromTs:Math.floor(from/1000),toTs:Math.floor(to/1000)};
 }
 
@@ -1569,27 +1592,54 @@ function initClientes(){
 function renderCustMetrics(list){
   const total=list.length;
   const active=list.filter(c=>c.mainStatus==='active').length;
-  const totalSubs=list.reduce((a,c)=>a+c.subs.length,0);
   const retentionPct=total>0?Math.round(active/total*100):0;
-  // Ticket promedio REAL: promedio de amount_paid sobre facturas efectivamente
-  // cobradas (>0), no el precio de lista — refleja el impacto de los cupones.
-  // INV_DATA no tiene cliente, así que el filtro de Estado se aproxima con el
-  // flag is_active de cada factura (1 = sub activa/trial, 0 = cancelada/vencida).
-  const sfSel=document.getElementById('cust-status-f');
-  const sfVal=sfSel?sfSel.value:'';
-  let invRows=INV_DATA.filter(r=>r[1]>0);
-  if(sfVal==='active'||sfVal==='trialing')invRows=invRows.filter(r=>r[5]===1);
-  else if(sfVal==='canceled')invRows=invRows.filter(r=>r[5]===0);
-  const ticketProm=invRows.length>0?fmt(invRows.reduce((a,r)=>a+r[1],0)/invRows.length):fmt(0);
-  const ticketBadge=invRows.length+' facturas cobradas';
+  // Ticket promedio y Total facturado: usan el monto REAL (post-cupón) del
+  // último cobro verificado de cada cliente (CUS_MRR), sobre el set YA
+  // filtrado por Estado/Producto/Búsqueda/Período — a diferencia del cálculo
+  // anterior que promediaba TODAS las facturas de INV_DATA (que no tiene
+  // cliente ni producto asociado) y por eso ignoraba esos filtros.
+  let totalBilled=0,billedCount=0;
+  list.forEach(c=>{
+    const mrr=CUS_MRR[c.id];
+    if(mrr&&mrr[0]>0){totalBilled+=mrr[0];billedCount++;}
+  });
+  const ticketProm=billedCount>0?fmt(totalBilled/billedCount):fmt(0);
+  const coverageBadge=billedCount+' de '+total+' con monto verificado';
   // Permanencia promedio: media de meses entre la primera alta y hoy (si el
   // cliente sigue activo) o hasta su última baja (si no), sobre el set filtrado.
   const avgTenure=total>0?(list.reduce((a,c)=>a+c.months,0)/total).toFixed(1):'0.0';
   document.getElementById('cust-metrics').innerHTML=`
     <div class="metric-card"><div class="mi purple">👥</div><div class="metric-label">Clientes únicos</div><div class="metric-value">${total}</div><div class="metric-sub"><span class="mbadge neutral">en base</span></div></div>
     <div class="metric-card"><div class="mi green">✓</div><div class="metric-label">Con suscripción activa</div><div class="metric-value">${active}</div><div class="metric-sub"><span class="mbadge up">${retentionPct}% retención</span></div></div>
-    <div class="metric-card"><div class="mi amber">💳</div><div class="metric-label">Ticket Promedio</div><div class="metric-value">${ticketProm}</div><div class="metric-sub"><span class="mbadge neutral">${ticketBadge}</span></div></div>
+    <div class="metric-card"><div class="mi amber">💳</div><div class="metric-label">Ticket Promedio</div><div class="metric-value">${ticketProm}</div><div class="metric-sub"><span class="mbadge neutral">${coverageBadge}</span></div></div>
+    <div class="metric-card"><div class="mi green">💵</div><div class="metric-label">Total facturado</div><div class="metric-value" style="font-size:22px">${fmt(totalBilled)}</div><div class="metric-sub"><span class="mbadge neutral">${coverageBadge}</span></div></div>
     <div class="metric-card"><div class="mi blue">📦</div><div class="metric-label">Permanencia promedio</div><div class="metric-value">${avgTenure}</div><div class="metric-sub"><span class="mbadge neutral">meses por cliente</span></div></div>`;
+}
+function getCustRange(){
+  const sel=document.getElementById('cust-period-f');
+  const v=sel?sel.value:'';
+  if(!v)return null;
+  const now=new Date();
+  let from,to=now;
+  if(v==='this_month'){from=new Date(now.getFullYear(),now.getMonth(),1);to=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59);}
+  else if(v==='last_month'){from=new Date(now.getFullYear(),now.getMonth()-1,1);to=new Date(now.getFullYear(),now.getMonth(),0,23,59,59);}
+  else if(v==='custom'){
+    const fromEl=document.getElementById('cust-period-from'),toEl=document.getElementById('cust-period-to');
+    from=fromEl&&fromEl.value?new Date(fromEl.value+'T00:00:00'):new Date(0);
+    to=toEl&&toEl.value?new Date(toEl.value+'T23:59:59'):now;
+  }
+  else{from=new Date(now.getTime()-parseInt(v)*864e5);}
+  // Nunca mostrar más allá de "ahora": si el rango calculado cae en el futuro
+  // (ej. fin del mes actual), se recorta al momento presente.
+  if(to.getTime()>now.getTime())to=now;
+  return{fromTs:Math.floor(from/1000),toTs:Math.floor(to/1000)};
+}
+function onCustPeriodChange(){
+  const v=document.getElementById('cust-period-f').value;
+  const fromWrap=document.getElementById('cust-period-from-wrap'),toWrap=document.getElementById('cust-period-to-wrap');
+  if(v==='custom'){fromWrap.style.display='';toWrap.style.display='';}
+  else{fromWrap.style.display='none';toWrap.style.display='none';}
+  filterCustomers();
 }
 function filterCustomers(){
   if(!ALL_CUSTS)return;
@@ -1597,6 +1647,7 @@ function filterCustomers(){
   const sf=document.getElementById('cust-status-f').value;
   const sort=document.getElementById('cust-sort').value;
   const pf=getSelectedCustProds();
+  const pr=getCustRange();
   custFiltered=ALL_CUSTS.filter(c=>{
     const cm2=CMAP[c.id];
     const nm=(cm2&&cm2[0]||'').toLowerCase();
@@ -1606,6 +1657,7 @@ function filterCustomers(){
     if(sf==='canceled'&&c.mainStatus!=='canceled')return false;
     if(sf==='trialing'&&c.mainStatus!=='trialing')return false;
     if(pf&&!c.products.some(p=>pf.has(p)))return false;
+    if(pr&&(c.firstSub<pr.fromTs||c.firstSub>pr.toTs))return false;
     return true;
   });
   renderCustMetrics(custFiltered);
