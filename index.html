@@ -71,6 +71,18 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
 .card-sub{font-size:12px;color:var(--text3);margin-top:2px;margin-bottom:16px;}
 .chart-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
 .cw{position:relative;width:100%;}
+.card-title-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:10px;}
+.card-title-row .card-title{margin-bottom:0;}
+.zoom-btn{background:var(--bg3);border:1px solid var(--border2);color:var(--text3);width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:background .12s,color .12s;}
+.zoom-btn:hover{background:var(--bg4);color:var(--text);}
+.chart-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:1000;align-items:center;justify-content:center;padding:30px;}
+.chart-modal-overlay.open{display:flex;}
+.chart-modal{background:var(--bg2);border:1px solid var(--border2);border-radius:14px;padding:24px 28px;width:min(1100px,100%);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.5);}
+.chart-modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
+.chart-modal-head h3{font-size:15px;font-weight:600;margin:0;}
+.chart-modal-close{background:var(--bg3);border:1px solid var(--border2);color:var(--text2);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;}
+.chart-modal-close:hover{background:var(--bg4);color:var(--text);}
+.chart-modal-body{position:relative;width:100%;height:min(60vh,520px);}
 .status-list{display:flex;flex-direction:column;}
 .srow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);}
 .srow:last-child{border-bottom:none;}
@@ -187,7 +199,7 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
       Cash Flow
     </button>
   </div>
-  <div class="sidebar-footer"><div class="pulse-dot"></div><div><div>721 subs · abr 2025 – may 2026</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:'DM Mono',monospace">build.292 · 1786066675</div></div></div>
+  <div class="sidebar-footer"><div class="pulse-dot"></div><div><div>721 subs · abr 2025 – may 2026</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:'DM Mono',monospace">build.295 · 1786995959</div></div></div>
 </aside>
 
 <main class="main">
@@ -281,12 +293,18 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
       </div>
       <div class="metrics-grid" id="metrics-grid"></div>
       <div class="card">
-        <div class="card-title"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 4-4"/></svg> Activas actuales al cierre de cada mes</div>
+        <div class="card-title-row">
+          <div class="card-title"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 4-4"/></svg> Activas actuales al cierre de cada mes</div>
+          <button class="zoom-btn" onclick="openChartZoom('tl','Activas actuales al cierre de cada mes')" title="Ampliar gráfico" type="button"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M11 8v6M8 11h6"/></svg></button>
+        </div>
         <div class="cw" style="height:200px"><canvas id="chart-timeline" role="img" aria-label="Activas actuales al cierre de cada mes"></canvas></div>
         <div id="timeline-note" style="display:none;font-size:11px;color:var(--text3);margin-top:8px"></div>
       </div>
       <div class="card">
-        <div class="card-title"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Ingresos netos en el tiempo</div>
+        <div class="card-title-row">
+          <div class="card-title"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Ingresos netos en el tiempo</div>
+          <button class="zoom-btn" onclick="openChartZoom('rev','Ingresos netos en el tiempo')" title="Ampliar gráfico" type="button"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M11 8v6M8 11h6"/></svg></button>
+        </div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:12px;margin-top:-8px">Importe neto cobrado en el período seleccionado (descontando cupones y comisión Stripe ~2.9%+$0.30)</div>
         <div class="cw" style="height:280px"><canvas id="chart-revenue" role="img" aria-label="Ingresos netos en el tiempo"></canvas></div>
         <div id="revenue-note" style="display:none;font-size:11px;color:var(--text3);margin-top:10px;line-height:1.5"></div>
@@ -390,6 +408,15 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
             <option value="oldest">Más antiguos</option>
             <option value="most_subs">Más suscripciones</option>
           </select>
+        </div>
+        <div class="fg"><label class="fl">Producto</label>
+          <div class="cup-dropdown" id="cust-prod-dropdown">
+            <button class="cup-dropdown-btn" id="cust-prod-dropdown-btn" onclick="toggleCustProdDropdown(event)" type="button">Todos los productos</button>
+            <div class="cup-checklist" id="cust-prod-checklist">
+              <label class="cup-cl-all"><input type="checkbox" id="cust-prod-check-all" checked onchange="toggleAllCustProds(this)"> <span>Seleccionar todos</span></label>
+              <div id="cust-prod-check-list"></div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="metrics-grid" id="cust-metrics"></div>
@@ -513,6 +540,15 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
     </div>
   </div>
 </main>
+<div class="chart-modal-overlay" id="chart-zoom-overlay" onclick="if(event.target===this)closeChartZoom()">
+  <div class="chart-modal">
+    <div class="chart-modal-head">
+      <h3 id="chart-zoom-title"></h3>
+      <button class="chart-modal-close" onclick="closeChartZoom()" type="button">×</button>
+    </div>
+    <div class="chart-modal-body"><canvas id="chart-zoom-canvas"></canvas></div>
+  </div>
+</div>
 </div>
 <script>
 const PM={
@@ -544,7 +580,7 @@ function updateHeaderMeta(){
   const tb=document.getElementById('topbar-sub');
   if(tb)tb.textContent=SUBS.length+' suscripciones · todos los productos';
   const sf=document.querySelector('.sidebar-footer');
-  if(sf)sf.innerHTML='<div class="pulse-dot"></div><div><div>'+SUBS.length+' subs · '+fmtMY(minC)+' – '+fmtMY(maxC)+'</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:\'DM Mono\',monospace">build.292 · 1786066675</div></div></div>';
+  if(sf)sf.innerHTML='<div class="pulse-dot"></div><div><div>'+SUBS.length+' subs · '+fmtMY(minC)+' – '+fmtMY(maxC)+'</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:\'DM Mono\',monospace">build.295 · 1786995959</div></div></div>';
   // Staleness banner: warn when the newest record is older than 3 days, since
   // stale embedded data has repeatedly been mistaken for calculation bugs.
   const banner=document.getElementById('stale-banner');
@@ -575,6 +611,7 @@ function initChartDefaults(){
   Chart.defaults.color='#8b8a94';Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.font.size=12;
 }
 const CHARTS={};
+const CHART_CFGS={};
 function dc(k){if(CHARTS[k]){try{CHARTS[k].destroy();}catch(e){}delete CHARTS[k];}}
 function dca(){Object.keys(CHARTS).forEach(k=>dc(k));}
 // Destrucción por grupo: cada tab destruye SOLO sus propios charts. Antes,
@@ -582,6 +619,27 @@ function dca(){Object.keys(CHARTS).forEach(k=>dc(k));}
 // y al volver quedaban canvases en blanco.
 const CHART_GROUPS={overview:['tl','rev','subtype','donut'],comp:['cm','cmetric','cdnt','crate'],historial:['hm','hn','hc'],cupones:['cupbar'],cashflow:['cfbar']};
 function dcg(group){(CHART_GROUPS[group]||[]).forEach(dc);}
+// Zoom modal: reopens any chart at larger size by reusing its exact config
+// (same data/options/plugins), so it always matches what's on screen.
+function openChartZoom(key,title){
+  const cfg=CHART_CFGS[key];
+  if(!cfg)return;
+  document.getElementById('chart-zoom-title').textContent=title||'';
+  const overlay=document.getElementById('chart-zoom-overlay');
+  overlay.classList.add('open');
+  document.body.style.overflow='hidden';
+  if(CHARTS.zoom){try{CHARTS.zoom.destroy();}catch(e){}delete CHARTS.zoom;}
+  const wrap=document.getElementById('chart-zoom-canvas');
+  const ctx=document.createElement('canvas');ctx.id='chart-zoom-canvas';wrap.parentNode.replaceChild(ctx,wrap);
+  CHARTS.zoom=new Chart(ctx,{type:cfg.type,data:cfg.data,options:cfg.options,plugins:cfg.plugins});
+}
+function closeChartZoom(){
+  const overlay=document.getElementById('chart-zoom-overlay');
+  overlay.classList.remove('open');
+  document.body.style.overflow='';
+  if(CHARTS.zoom){try{CHARTS.zoom.destroy();}catch(e){}delete CHARTS.zoom;}
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeChartZoom();});
 // DATA_REV se incrementa en cada refresh de datos; TAB_SIG memoriza la firma
 // (datos + filtros) del último render de cada tab para saltear re-renders
 // idénticos al cambiar de pestaña.
@@ -859,7 +917,8 @@ function renderOverview(){
     }
     const wrap1=document.getElementById('chart-timeline');
     if(wrap1){const ctx=document.createElement('canvas');wrap1.parentNode.replaceChild(ctx,wrap1);ctx.id='chart-timeline';
-      CHARTS.tl=new Chart(ctx,{
+      const maxCount=Math.max(0,...bkts.map(b=>b.count));
+      const cfg={
         type:'bar',
         data:{
           labels:bkts.map(b=>b.label),
@@ -875,13 +934,14 @@ function renderOverview(){
         options:{
           responsive:true,
           maintainAspectRatio:false,
+          layout:{padding:{top:22}},
           plugins:{
             legend:{display:false},
               tooltip:{callbacks:{label:c=>` ${c.raw} activas actuales al cierre`}}
           },
           scales:{
             x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:false,font:{size:11}}},
-            y:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}
+            y:{beginAtZero:true,suggestedMax:Math.ceil(maxCount*1.2)||1,grid:{color:'rgba(255,255,255,.04)'},ticks:{precision:0}}
           },
           animation:{onComplete:function(){
             const chart=this;
@@ -900,12 +960,17 @@ function renderOverview(){
             ctx2.restore();
           }}
         }
-      });
+      };
+      CHARTS.tl=new Chart(ctx,cfg);
+      CHART_CFGS.tl=cfg;
     }
   });
   // Revenue chart — sum of amounts paid (exclude trialing)
   // INV_DATA: [created, amount_paid, discount_amount, coupon_name, net_after_stripe_fee, is_active(1/0)] (global)
-  // Revenue line chart: always monthly, always "this year" (Jan–current month)
+  // Revenue line chart: buckets follow the selected Período filter. Ranges
+  // longer than ~2 months group by calendar month; shorter ranges (under a
+  // month) switch to 8 equal day buckets, mirroring the "Activas actuales
+  // al cierre de cada mes" chart above.
   (function buildRevChart(){
     dc('rev');
     // Apply the page filters:
@@ -927,19 +992,32 @@ function renderOverview(){
       const attributable=INV_DATA.filter(r=>r[0]>=fs&&r[0]<=ts&&idx.has(r[0])).reduce((a,r)=>a+r[4],0);
       coverage=totalNetInRange>0?Math.round(attributable/totalNetInRange*100):0;
     }
-    // Bucketing en UNA sola pasada (Map por año*12+mes) en vez de un
-    // rows.filter() por cada mes del rango: O(facturas) en lugar de
-    // O(meses × facturas). Mismo resultado, mismos límites de mes local.
-    const byYm=new Map();
-    rows.forEach(r=>{const d=new Date(r[0]*1000);const k=d.getFullYear()*12+d.getMonth();byYm.set(k,(byYm.get(k)||0)+r[4]);});
-    const startD=new Date(fs*1000),endD=new Date(ts*1000);
-    const months=[];
-    let y=startD.getFullYear(),m=startD.getMonth();
-    while(y<endD.getFullYear()||(y===endD.getFullYear()&&m<=endD.getMonth())){
-      const label=new Date(y,m,1).toLocaleDateString('es-AR',{month:'short'})+(y!==new Date().getFullYear()?'/'+(y%100):'');
-      const net=byYm.get(y*12+m)||0;
-      months.push({label,net});
-      m++;if(m>11){m=0;y++;}
+    // Bucketing: meses cuando el rango es largo (>2 meses), días cuando es
+    // corto — misma lógica y umbral que el gráfico de "Activas actuales".
+    let months;
+    if(rangeMonths>2){
+      // Una sola pasada (Map por año*12+mes) en vez de un rows.filter() por
+      // cada mes del rango: O(facturas) en lugar de O(meses × facturas).
+      const byYm=new Map();
+      rows.forEach(r=>{const d=new Date(r[0]*1000);const k=d.getFullYear()*12+d.getMonth();byYm.set(k,(byYm.get(k)||0)+r[4]);});
+      const startD=new Date(fs*1000),endD=new Date(ts*1000);
+      months=[];
+      let y=startD.getFullYear(),m=startD.getMonth();
+      while(y<endD.getFullYear()||(y===endD.getFullYear()&&m<=endD.getMonth())){
+        const label=new Date(y,m,1).toLocaleDateString('es-AR',{month:'short'})+(y!==new Date().getFullYear()?'/'+(y%100):'');
+        const net=byYm.get(y*12+m)||0;
+        months.push({label,net});
+        m++;if(m>11){m=0;y++;}
+      }
+    } else {
+      months=Array.from({length:8},(_,i)=>{
+        const bs=fs+Math.floor(i*(ts-fs)/8),be=fs+Math.floor((i+1)*(ts-fs)/8);
+        const d=new Date(bs*1000);
+        const day=String(d.getDate()).padStart(2,'0');
+        const label=day+'-'+monthNames[d.getMonth()];
+        const net=rows.filter(r=>r[0]>=bs&&(i===7?r[0]<=be:r[0]<be)).reduce((a,r)=>a+r[4],0);
+        return{label,net};
+      });
     }
     const rn=document.getElementById('revenue-note');
     if(rn){
@@ -954,7 +1032,8 @@ function renderOverview(){
       if(!wrapR)return;
       const rctx=document.createElement('canvas');wrapR.parentNode.replaceChild(rctx,wrapR);rctx.id='chart-revenue';
       const vals=months.map(b=>+(b.net/100).toFixed(2));
-      CHARTS.rev=new Chart(rctx,{
+      const maxVal=Math.max(0,...vals);
+      const revCfg={
         type:'line',
         data:{
           labels:months.map(b=>b.label),
@@ -985,6 +1064,7 @@ function renderOverview(){
             x:{grid:{color:'rgba(255,255,255,.04)'},ticks:{font:{size:11}}},
             y:{
               beginAtZero:true,
+              suggestedMax:Math.ceil(maxVal*1.25)||1,
               grid:{color:'rgba(255,255,255,.04)'},
               ticks:{callback:v=>'$'+(v>=1000?(v/1000).toFixed(0)+'k':v)}
             }
@@ -1033,7 +1113,9 @@ function renderOverview(){
             });
           }
         }]
-      });
+      };
+      CHARTS.rev=new Chart(rctx,revCfg);
+      CHART_CFGS.rev=revCfg;
     });
   })();
   // Distribución de activas por tipo de período (mensual/trimestral/anual)
@@ -1434,9 +1516,54 @@ function buildCustomers(){
   });
 }
 let ALL_CUSTS=null;
+function populateCustProdFilter(){
+  const list=document.getElementById('cust-prod-check-list');
+  if(!list)return;
+  const prevChecked=new Set([...document.querySelectorAll('#cust-prod-check-list input[type=checkbox]:checked')].map(c=>c.value));
+  const prevExisted=document.querySelectorAll('#cust-prod-check-list input[type=checkbox]').length>0;
+  const ids=[...new Set(ALL_CUSTS.flatMap(c=>c.products))].sort((a,b)=>(PM[a]||a).localeCompare(PM[b]||b));
+  list.innerHTML=ids.map(id=>`<label><input type="checkbox" value="${esc(id)}"${(!prevExisted||prevChecked.has(id))?' checked':''} onchange="updateCustProdBtn();filterCustomers()"> <span>${esc(PM[id]||id)}</span></label>`).join('');
+  updateCustProdBtn();
+}
+function toggleCustProdDropdown(e){
+  e.stopPropagation();
+  document.getElementById('cust-prod-checklist').classList.toggle('open');
+}
+function toggleAllCustProds(cb){
+  document.querySelectorAll('#cust-prod-check-list input[type=checkbox]').forEach(c=>c.checked=cb.checked);
+  updateCustProdBtn();
+  filterCustomers();
+}
+function updateCustProdBtn(){
+  const all=document.querySelectorAll('#cust-prod-check-list input[type=checkbox]');
+  const checked=[...all].filter(c=>c.checked);
+  const btn=document.getElementById('cust-prod-dropdown-btn');
+  const allChk=document.getElementById('cust-prod-check-all');
+  if(!btn)return;
+  if(checked.length===0||checked.length===all.length){
+    btn.textContent='Todos los productos';
+    if(allChk)allChk.checked=checked.length===all.length;
+  } else {
+    btn.textContent=checked.length===1?(PM[checked[0].value]||checked[0].value):checked.length+' productos seleccionados';
+    if(allChk)allChk.checked=false;
+  }
+}
+function getSelectedCustProds(){
+  const checks=[...document.querySelectorAll('#cust-prod-check-list input[type=checkbox]')];
+  const checked=checks.filter(c=>c.checked).map(c=>c.value);
+  return checked.length===0||checked.length===checks.length?null:new Set(checked);
+}
+document.addEventListener('click',function(e){
+  const dd=document.getElementById('cust-prod-dropdown');
+  if(dd&&!dd.contains(e.target)){
+    const cl=document.getElementById('cust-prod-checklist');
+    if(cl)cl.classList.remove('open');
+  }
+});
 function initClientes(){
   if(ALL_CUSTS)return filterCustomers();
   ALL_CUSTS=buildCustomers();
+  populateCustProdFilter();
   filterCustomers();
 }
 function renderCustMetrics(list){
@@ -1469,6 +1596,7 @@ function filterCustomers(){
   const q=(document.getElementById('cust-search').value||'').toLowerCase();
   const sf=document.getElementById('cust-status-f').value;
   const sort=document.getElementById('cust-sort').value;
+  const pf=getSelectedCustProds();
   custFiltered=ALL_CUSTS.filter(c=>{
     const cm2=CMAP[c.id];
     const nm=(cm2&&cm2[0]||'').toLowerCase();
@@ -1477,6 +1605,7 @@ function filterCustomers(){
     if(sf==='active'&&c.mainStatus!=='active')return false;
     if(sf==='canceled'&&c.mainStatus!=='canceled')return false;
     if(sf==='trialing'&&c.mainStatus!=='trialing')return false;
+    if(pf&&!c.products.some(p=>pf.has(p)))return false;
     return true;
   });
   renderCustMetrics(custFiltered);
