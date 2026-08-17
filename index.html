@@ -199,7 +199,7 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
       Cash Flow
     </button>
   </div>
-  <div class="sidebar-footer"><div class="pulse-dot"></div><div><div>721 subs · abr 2025 – may 2026</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:'DM Mono',monospace">build.297 · 1786998335</div></div></div>
+  <div class="sidebar-footer"><div class="pulse-dot"></div><div><div>721 subs · abr 2025 – may 2026</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:'DM Mono',monospace">build.298 · 1787000501</div></div></div>
 </aside>
 
 <main class="main">
@@ -451,6 +451,7 @@ select:focus,input[type=date]:focus{outline:none;border-color:rgba(108,99,255,.5
             <th>Meses activo</th>
             <th>Estado actual</th>
             <th>Productos</th>
+            <th>Plan</th>
             <th>Primera alta</th>
             <th>Última alta</th>
           </tr></thead>
@@ -599,7 +600,7 @@ function updateHeaderMeta(){
   const tb=document.getElementById('topbar-sub');
   if(tb)tb.textContent=SUBS.length+' suscripciones · todos los productos';
   const sf=document.querySelector('.sidebar-footer');
-  if(sf)sf.innerHTML='<div class="pulse-dot"></div><div><div>'+SUBS.length+' subs · '+fmtMY(minC)+' – '+fmtMY(maxC)+'</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:\'DM Mono\',monospace">build.297 · 1786998335</div></div></div>';
+  if(sf)sf.innerHTML='<div class="pulse-dot"></div><div><div>'+SUBS.length+' subs · '+fmtMY(minC)+' – '+fmtMY(maxC)+'</div><div style="font-size:9px;color:var(--text3);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);letter-spacing:.5px;font-family:\'DM Mono\',monospace">build.298 · 1787000501</div></div></div>';
   // Staleness banner: warn when the newest record is older than 3 days, since
   // stale embedded data has repeatedly been mistaken for calculation bugs.
   const banner=document.getElementById('stale-banner');
@@ -670,6 +671,16 @@ function fmt(c){return'$'+(c/100).toLocaleString('es-AR',{minimumFractionDigits:
 // el cliente en el checkout → sin esto, un nombre como <img onerror=...>
 // se ejecutaría como HTML en la tabla de Clientes (XSS almacenado).
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+// Etiqueta de plan (Mensual/Trimestral/Anual) a partir del intervalo real de
+// cobro de la suscripción. Usado por el gráfico "por tipo de período" en
+// Resumen y por la columna Plan en Clientes.
+function planLabel(s){
+  if(!s)return'—';
+  if(s.interval==='year'&&s.interval_count===1)return'Anual';
+  if(s.interval==='month'&&s.interval_count===3)return'Trimestral';
+  if(s.interval==='month'&&s.interval_count===1)return'Mensual';
+  return'Otro';
+}
 
 // Tab switching
 const TABS=['overview','comp','historial','clientes','cupones','cashflow'];
@@ -1145,13 +1156,7 @@ function renderOverview(){
   (function buildSubTypeChart(){
     dc('subtype');
     const activeSubs=uniqueActiveSubs(allF);
-    function subTypeLabel(s){
-      if(s.interval==='year'&&s.interval_count===1)return'Anual';
-      if(s.interval==='month'&&s.interval_count===3)return'Trimestral';
-      if(s.interval==='month'&&s.interval_count===1)return'Mensual';
-      return'Otro';
-    }
-    const tm={};activeSubs.forEach(s=>{const l=subTypeLabel(s);tm[l]=(tm[l]||0)+1;});
+    const tm={};activeSubs.forEach(s=>{const l=planLabel(s);tm[l]=(tm[l]||0)+1;});
     const order=['Mensual','Trimestral','Anual','Otro'];
     const te=order.filter(l=>tm[l]).map(l=>[l,tm[l]]);
     const TC={Mensual:'#6c63ff',Trimestral:'#f59e0b',Anual:'#22c55e',Otro:'#4b5563'};
@@ -1527,6 +1532,7 @@ function buildCustomers(){
     c.subs.sort((a,b)=>(statusPri[a.status]||3)-(statusPri[b.status]||3));
     c.mainStatus=c.subs[0]?.status||'canceled';
     c.products=[...new Set(c.subs.map(s=>s.product))];
+    c.plans=[...new Set(c.subs.map(s=>planLabel(s)))];
     // Months = sum of (amount/amount * interval_count * periods) - approximate via subs count & interval
     // Best proxy: total interval_count across active subs (billing cycles planned)
     // For active subs: use next_invoice_sequence equivalent = number of renewals
@@ -1680,6 +1686,7 @@ function renderCustPage(){
     <td style="font-family:'DM Mono',monospace">${c.months}</td>
     <td><span class="tag tag-${c.mainStatus}">${SL[c.mainStatus]||c.mainStatus}</span></td>
     <td style="font-size:11px;color:var(--text3)">${c.products.slice(0,2).map(p=>esc(PM[p]||p)).join(', ')}${c.products.length>2?' +'+( c.products.length-2):''}</td>
+    <td style="font-size:11px;color:var(--text3)">${c.plans.slice(0,2).join(', ')}${c.plans.length>2?' +'+(c.plans.length-2):''}</td>
     <td style="font-size:12px;color:var(--text3)">${fd(c.firstSub)}</td>
     <td style="font-size:12px;color:var(--text3)">${fd(c.lastSub)}</td>
   </tr>`;
